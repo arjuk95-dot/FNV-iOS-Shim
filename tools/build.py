@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+from state_probes import normalize,instrument
 
 ROOT = Path(__file__).resolve().parents[1]
 R = ROOT / 'upstream/recomp'
@@ -33,7 +34,10 @@ def main():
     p.add_argument('--out', type=Path, default=Path('build'))
     p.add_argument('--jobs', type=int, default=min(os.cpu_count() or 2, 6))
     p.add_argument('--cache',type=Path,help='private verified object cache; compiler, SDK, flags, headers and content keyed')
+    p.add_argument('--state-probes',default='[]',help='bounded numeric entry/receiver-field diagnostic specification')
     args = p.parse_args()
+    probes=normalize(args.state_probes)
+    matched_probes=set()
     probe = args.target == 'probe'
     host_check = args.target == 'host-check'
     if args.target == 'game' and not (args.exe and args.exe.is_file() and args.generated and (args.generated/'table.c').is_file()
@@ -69,19 +73,27 @@ def main():
         def compile_one(item):
             idx,source=item
             out=tmp/f'{idx}.o'
+            content=source.read_bytes();matched=set()
+            if probes and args.generated and source.parent.resolve()==args.generated.resolve():
+                content,matched=instrument(content,probes)
+                matched_probes.update(matched)
+            compiled_source=source
+            if matched:
+                compiled_source=tmp/('probe-'+source.name);compiled_source.write_bytes(content)
             flags=['-O1','-I',str(H),'-I',str(R),'-I',str(I)]
             if source.suffix=='.m': flags.append('-fobjc-arc')
             if probe: flags.append('-DFNV_PROBE')
             elif not host_check: flags.append('-DRT_CALLTRACE')
-            key=hashlib.sha256(config+json.dumps(base+flags).encode()+source.name.encode()+source.read_bytes()).hexdigest()
+            key=hashlib.sha256(config+json.dumps(base+flags).encode()+source.name.encode()+content).hexdigest()
             stored=args.cache/(key+'.o') if args.cache else None
             if stored and stored.exists() and digest(stored)==old_manifest.get(stored.name):return str(stored),True
-            run(base + flags + ['-c',str(source),'-o',str(out)])
+            run(base + flags + ['-c',str(compiled_source),'-o',str(out)])
             if stored:os.replace(out,stored);out=stored
             return str(out),False
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
             compiled=list(pool.map(compile_one, enumerate(sources)))
         objects=[path for path,_ in compiled]
+        if probes and set(probes)!=matched_probes:raise ValueError('Requested diagnostic entries absent from generated source')
         print(f'iOS objects: {sum(reused for _,reused in compiled)} reused, {sum(not reused for _,reused in compiled)} compiled',flush=True)
         if args.cache:
             (args.cache/'manifest.json').write_text(json.dumps({Path(path).name:digest(Path(path)) for path in objects},indent=2))

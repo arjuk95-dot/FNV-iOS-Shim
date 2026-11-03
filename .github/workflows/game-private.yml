@@ -18,6 +18,11 @@ on:
         description: Optional prior private iOS object artifact run
         required: false
         type: string
+      state_probes:
+        description: Optional bounded JSON entry and receiver-field probes
+        required: false
+        default: '[]'
+        type: string
 permissions:
   contents: read
   actions: read
@@ -31,6 +36,7 @@ jobs:
       INPUT_SHA256: ${{ inputs.input_sha256 }}
       EXE_SHA256: ${{ inputs.executable_sha256 }}
       CACHE_RUN_ID: ${{ inputs.cache_run_id }}
+      STATE_PROBES: ${{ inputs.state_probes }}
     steps:
       - uses: actions/checkout@v4
       - name: Require private repository
@@ -47,7 +53,7 @@ jobs:
             case "$CACHE_RUN_ID" in *[!0-9]*) exit 1;; esac
             gh run download "$CACHE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name FNV-ios-objects-private --dir build/ios-objects
           fi
-          python3 tools/build.py game --generated "$RUNNER_TEMP/fnv-private/generated" --exe "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --jobs 2 --cache build/ios-objects
+          python3 tools/build.py game --generated "$RUNNER_TEMP/fnv-private/generated" --exe "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --jobs 2 --cache build/ios-objects --state-probes "$STATE_PROBES"
       - name: Verify game IPA
         run: python3 tools/verify_ipa.py build/FNVGame.ipa --target game --receipt build/game-validation.json
       - uses: actions/upload-artifact@v4

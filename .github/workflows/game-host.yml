@@ -11,6 +11,7 @@ jobs:
         with:
           fetch-depth: 0
       - run: python3 tests/sync_shims_test.py
+      - run: python3 tests/guest_diagnostics_test.py
       - run: python3 tests/file_shims_case_test.py
       - run: python3 tools/build.py host-check --cache build/host-objects
       - run: python3 tools/build.py host-check --cache build/host-objects
