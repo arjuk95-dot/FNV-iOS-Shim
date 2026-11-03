@@ -1,0 +1,12 @@
+name: Check native media and input
+on: workflow_dispatch
+permissions:
+  contents: read
+  actions: read
+jobs:
+  media:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tests/audio_shims_test.py
