@@ -11,7 +11,7 @@ static int types[32];
 uint32_t handle_new(int type,void *object){for(int i=1;i<32;i++)if(!objects[i]){objects[i]=object;types[i]=type;return i;}abort();}
 void *handle_get(uint32_t h,int type){return h<32&&types[h]==type?objects[h]:NULL;}
 int handle_type(uint32_t h){return h<32?types[h]:0;}
-void handle_close(uint32_t h){if(h<32&&objects[h]){if(types[h]==H_FILE)close(*(int *)objects[h]);free(objects[h]);objects[h]=NULL;types[h]=0;}}
+void handle_close(uint32_t h){if(h<32&&objects[h]){if(types[h]==H_FILE){close(*(int *)objects[h]);free(objects[h]);}objects[h]=NULL;types[h]=0;}}
 static uint32_t call(const char *name,const uint32_t *args,int count){
     CPU c={0};SETREG(&c,R_ESP,0x1000);P32(0x1000,0xabc);
     for(int i=0;i<count;i++)P32(0x1004+4*i,args[i]);

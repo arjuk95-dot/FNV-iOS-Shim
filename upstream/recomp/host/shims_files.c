@@ -2,6 +2,7 @@
 // Windows paths map onto the host: '\' -> '/', a drive letter or the game's install path maps to
 // FNV_ROOT (default: the current directory, which holds Data/ and the INIs).
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
 #include <stdio.h>
@@ -10,20 +11,57 @@
 #include <unistd.h>
 #include "shims.h"
 
+static void existing_path_case(const char *path,char *out,size_t n) {
+    if (!n) return;
+    struct stat st;
+    if (!lstat(path,&st)) { snprintf(out,n,"%s",path); return; }
+    char result[1024]="",part[1024],candidate[1024];
+    const char *p=path;
+    if (*p=='/') { strcpy(result,"/"); p++; }
+    while (*p) {
+        while (*p=='/') p++;
+        if (!*p) break;
+        const char *end=strchr(p,'/');size_t length=end?(size_t)(end-p):strlen(p);
+        if (length>=sizeof part) break;
+        memcpy(part,p,length);part[length]=0;
+        size_t used=strlen(result);const char *slash=used&&result[used-1]!='/'?"/":"";
+        snprintf(candidate,sizeof candidate,"%s%s%s",result,slash,part);
+        if (lstat(candidate,&st)) {
+            DIR *directory=opendir(result[0]?result:".");
+            if (directory) {
+                struct dirent *entry;
+                while ((entry=readdir(directory))) if (!strcasecmp(entry->d_name,part)) {
+                    snprintf(part,sizeof part,"%s",entry->d_name);break;
+                }
+                closedir(directory);
+            }
+        }
+        snprintf(candidate,sizeof candidate,"%s%s%s",result,slash,part);
+        snprintf(result,sizeof result,"%s",candidate);
+        p=end?end+1:p+length;
+    }
+    snprintf(out,n,"%s",result);
+}
+
 void host_path(const char *win, char *out, size_t n) {
+    if (!n) return;
+    if (!win) { out[0]=0; return; }
     const char *root = getenv("FNV_ROOT");
     char tmp[1024]; size_t k = 0;
     const char *p = win;
     if (p[0] && p[1] == ':') {                         // "C:\Games\FalloutNV\Data\x" -> root + rest
         p += 2;
-        const char *game = strstr(p, "FalloutNV\\");
-        if (game) p = game + 10;
-        else if (*p == '\\') p++;
+        const char *game=NULL;
+        for (const char *q=p;*q;q++) if ((q==p||q[-1]=='\\'||q[-1]=='/')
+            && !strncasecmp(q,"FalloutNV",9) && (!q[9]||q[9]=='\\'||q[9]=='/')) { game=q;break; }
+        if (game) { p=game+9;if (*p) p++; }
+        else if (*p == '\\'||*p=='/') p++;
         k = (size_t)snprintf(tmp, sizeof tmp, "%s/", root ? root : ".");
+        if (k>=sizeof tmp) k=sizeof tmp-1;
     }
     for (; *p && k < sizeof tmp - 1; p++) tmp[k++] = *p == '\\' ? '/' : *p;
     tmp[k] = 0;
-    snprintf(out, n, "%s", tmp);
+    existing_path_case(tmp,out,n);
 }
 
 void w2a(uint32_t w, char *out, size_t n) {
@@ -52,7 +90,8 @@ static uint32_t open_file(const char *winpath, uint32_t access, uint32_t disp) {
     case 5: fl |= O_TRUNC; break;                 // TRUNCATE_EXISTING
     }
     int fd = open(path, fl, 0644);
-    if (trace_files()) fprintf(stderr, "[file] open %s (%s) -> %d\n", winpath, path, fd);
+    int error=fd<0?errno:0;
+    if (trace_files()) fprintf(stderr, "[file] open %s (%s) -> %d errno=%d\n", winpath, path, fd,error);
     if (fd < 0) { SETERR(2); return 0xFFFFFFFFu; }   // ERROR_FILE_NOT_FOUND, INVALID_HANDLE_VALUE
     FileObj *f = malloc(sizeof *f); f->fd = fd;
     return handle_new(H_FILE, f);
@@ -178,7 +217,9 @@ SHIM(FindClose) { FindObj *f = handle_get(ARG(c, 0), H_FIND); if (f) { closedir(
 // ---- INI profile functions (Fallout.ini & friends) -------------------------------------------
 static int ini_get(const char *file, const char *sec, const char *key, char *out, size_t n) {
     char p[1024]; host_path(file, p, sizeof p);
-    FILE *f = fopen(p, "r"); if (!f) return 0;
+    FILE *f = fopen(p, "r");
+    if (trace_files()) fprintf(stderr,"[ini] read %s (%s) section=%s key=%s opened=%d\n",file,p,sec,key,f!=NULL);
+    if (!f) return 0;
     char line[2048], cur[256] = ""; int found = 0;
     while (fgets(line, sizeof line, f)) {
         char *s = line; while (*s == ' ' || *s == '\t') s++;
