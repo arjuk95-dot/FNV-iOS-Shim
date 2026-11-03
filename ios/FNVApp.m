@@ -158,8 +158,15 @@ static void gameButton(UIButton *button, BOOL down) {
             char *argv[] = {"fnv-ios", "FalloutNV.exe", NULL};
             int rc = fnv_run_game(2, argv);
 #endif
+            __block NSString *failureDetail = nil;
+            if (rc) {
+                NSString *diagnostic = [NSString stringWithContentsOfURL:log encoding:NSUTF8StringEncoding error:NULL];
+                [diagnostic enumerateLinesUsingBlock:^(NSString *line, BOOL *stop) {
+                    if ([line hasPrefix:@"[host] TRAP"]) failureDetail = line;
+                }];
+            }
             dispatch_async(dispatch_get_main_queue(), ^{
-                self.status.text = [NSString stringWithFormat:@"Host returned %d. See Documents/fnv.log.",rc];
+                self.status.text = failureDetail ?: [NSString stringWithFormat:@"Host returned %d. See Documents/fnv.log.",rc];
             });
         }
     }];
