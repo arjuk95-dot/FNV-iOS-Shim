@@ -74,12 +74,16 @@ def main():
         frameworks=['Foundation','UIKit','Metal','QuartzCore','CoreGraphics','AVFoundation','CoreVideo','CoreMedia','ImageIO','UniformTypeIdentifiers']
         run(base+objects+[v for f in frameworks for v in ('-framework',f)]+['-o',str(app/name)])
         info=dict(CFBundleDevelopmentRegion='en',CFBundleExecutable=name,CFBundleName=name,CFBundleDisplayName=name,
-                  CFBundleIdentifier='dev.fnvshim.'+args.target,CFBundlePackageType='APPL',CFBundleVersion='1',
+                  CFBundleIdentifier='dev.fnvshim.'+args.target,CFBundlePackageType='APPL',CFBundleVersion=os.environ.get('GITHUB_RUN_NUMBER','1'),
                   CFBundleShortVersionString='0.1',CFBundleInfoDictionaryVersion='6.0',MinimumOSVersion='18.0',
                   CFBundleSupportedPlatforms=['iPhoneOS'],UIDeviceFamily=[1,2],LSRequiresIPhoneOS=True,
                   UIFileSharingEnabled=True,LSSupportsOpeningDocumentsInPlace=True,UILaunchScreen={},
                   UISupportedInterfaceOrientations=['UIInterfaceOrientationLandscapeLeft','UIInterfaceOrientationLandscapeRight'])
         if not probe: info['FNVExecutableSHA256']=digest(args.exe)
+        try:
+            info['FNVBuildSourceCommit']=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True,stderr=subprocess.DEVNULL).strip()
+        except (OSError, subprocess.CalledProcessError):
+            pass
         (app/'Info.plist').write_bytes(plistlib.dumps(info))
         ipa=args.out/(name+'.ipa')
         with zipfile.ZipFile(tmp/ipa.name,'w',zipfile.ZIP_DEFLATED) as z:
