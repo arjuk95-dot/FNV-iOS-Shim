@@ -1,0 +1,11 @@
+name: Compile public iPhone game host
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  game-host:
+    runs-on: macos-15
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/build.py host-check

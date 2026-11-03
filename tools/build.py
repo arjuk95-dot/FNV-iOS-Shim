@@ -26,14 +26,15 @@ def digest(path):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('target', choices=['probe','game'])
+    p.add_argument('target', choices=['probe','game','host-check'])
     p.add_argument('--generated', type=Path, help='full-game emit.py output')
     p.add_argument('--exe', type=Path, help='exact executable used to generate these units')
     p.add_argument('--out', type=Path, default=Path('build'))
     p.add_argument('--jobs', type=int, default=min(os.cpu_count() or 2, 6))
     args = p.parse_args()
     probe = args.target == 'probe'
-    if not probe and not (args.exe and args.exe.is_file() and args.generated and (args.generated/'table.c').is_file()
+    host_check = args.target == 'host-check'
+    if args.target == 'game' and not (args.exe and args.exe.is_file() and args.generated and (args.generated/'table.c').is_file()
                           and (args.generated/'stubs.c').is_file() and any(args.generated.glob('tu_*.c'))):
         p.error('game requires --exe and --generated with full translated C sources')
     if not shutil.which('xcrun'): p.exit(1,'Apple build required: install Xcode and select it with xcode-select.\n')
@@ -46,8 +47,10 @@ def main():
         sources += [H/(s+'.c') for s in ['d3d9','dinput','com','gheap','input','sm2msl']]
     else:
         sources += [f for f in H.glob('*.c') if f.name != 'd3d9_null.c']
-        sources += [H/'dshow.m',R/'rt_dispatch.c',args.generated/'table.c',args.generated/'stubs.c']
-        sources += sorted(args.generated.glob('tu_*.c'))
+        sources += [H/'dshow.m',R/'rt_dispatch.c']
+        if not host_check:
+            sources += [args.generated/'table.c',args.generated/'stubs.c']
+            sources += sorted(args.generated.glob('tu_*.c'))
     args.out.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.out) as temp:
         tmp=Path(temp)
@@ -64,6 +67,9 @@ def main():
             return str(out)
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
             objects=list(pool.map(compile_one, enumerate(sources)))
+        if host_check:
+            print(f'PASS: compiled {len(objects)} public game-host sources for arm64 iPhoneOS; no game inputs or IPA')
+            return
         frameworks=['Foundation','UIKit','Metal','QuartzCore','CoreGraphics','AVFoundation','CoreVideo','CoreMedia','ImageIO','UniformTypeIdentifiers']
         run(base+objects+[v for f in frameworks for v in ('-framework',f)]+['-o',str(app/name)])
         info=dict(CFBundleDevelopmentRegion='en',CFBundleExecutable=name,CFBundleName=name,CFBundleDisplayName=name,
