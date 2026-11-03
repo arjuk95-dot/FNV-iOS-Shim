@@ -59,7 +59,8 @@ def verify(path, target):
     return dict(target=target, ipa=str(path.resolve()), sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
                 bytes=path.stat().st_size, bundle_id=info['CFBundleIdentifier'], architecture='arm64',
                 platform='iPhoneOS', executable_mode=oct(mode & 0o777), zip_members=len(entries),
-                dylibs=frameworks, unsigned=True, executable_sha256=info.get('FNVExecutableSHA256'))
+                dylibs=frameworks, unsigned=True, executable_sha256=info.get('FNVExecutableSHA256'),
+                build_source_commit=info.get('FNVBuildSourceCommit'), build_version=info.get('CFBundleVersion'))
 
 
 def main():
