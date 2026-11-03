@@ -8,4 +8,5 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
+      - run: python3 tests/file_shims_case_test.py
       - run: python3 tools/build.py host-check
