@@ -28,6 +28,8 @@ jobs:
       EXE_SHA256: ${{ inputs.executable_sha256 }}
     steps:
       - uses: actions/checkout@v4
+      - name: Verify startup failure gate
+        run: python3 tests/startup_gate_test.py
       - name: Install optional Mac discovery dependency
         if: inputs.discovery
         run: brew install unicorn
