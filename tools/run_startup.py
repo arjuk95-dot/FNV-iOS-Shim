@@ -5,6 +5,7 @@ No Data is uploaded by this diagnostic. Reaching a missing-data boundary is not
 proof of title-screen boot or gameplay; a translation trap always fails the run.
 """
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -20,15 +21,23 @@ def main():
     parser.add_argument('exe', type=Path)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--timeout', type=int, default=60)
-    parser.add_argument('--label', choices=['strict', 'discovery','synthetic','synthetic-discovery','synthetic-bsa','synthetic-bsa-discovery','synthetic-bsa-raw','synthetic-bsa-raw-discovery'], default='strict')
+    parser.add_argument('--label', choices=['strict', 'discovery','synthetic','synthetic-discovery','synthetic-bsa','synthetic-bsa-discovery','synthetic-bsa-raw','synthetic-bsa-raw-discovery','synthetic-bsa-reference','synthetic-bsa-sensitive'], default='strict')
+    parser.add_argument('--case-sensitive',action='store_true',help='put the fixture on a real case-sensitive APFS volume')
     args = parser.parse_args()
+    with ExitStack() as fixtures:run(args,fixtures)
+
+def run(args,fixtures):
     binary, exe = args.binary.resolve(), args.exe.resolve()
     fixture=None
     if args.label.startswith('synthetic'):
         # Author-created minimal input exercises the real XML loader, not a fake
         # successful return. No original game asset or owner INI is uploaded.
-        fixture=tempfile.TemporaryDirectory(prefix='fnv-synthetic-ui-')
-        directory=Path(fixture.name);shutil.copyfile(exe,directory/exe.name);exe=directory/exe.name
+        fixture=True
+        if args.case_sensitive:
+            from case_sensitive_fs import case_sensitive_root
+            directory=fixtures.enter_context(case_sensitive_root())
+        else:directory=Path(fixtures.enter_context(tempfile.TemporaryDirectory(prefix='fnv-synthetic-ui-')))
+        shutil.copyfile(exe,directory/exe.name);exe=directory/exe.name
         from startup.synthetic_assets import prepare
         prepare(directory,packed='bsa' in args.label,compressed='raw' not in args.label)
     args.out.mkdir(parents=True, exist_ok=True)
@@ -47,7 +56,8 @@ def main():
     receipt = dict(returncode=code, timed_out=timed_out, translation_traps=traps,
                    executable_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),
                    log_sha256=hashlib.sha256(log.read_bytes()).hexdigest(),
-                   mode=args.label, game_data_supplied=False, synthetic_ui_fixture=fixture is not None,title_or_gameplay_verified=False)
+                   mode=args.label, game_data_supplied=False, synthetic_ui_fixture=fixture is not None,
+                   case_sensitive_fixture=args.case_sensitive,title_or_gameplay_verified=False)
     roots = exe.parent/'fallback_entries.txt'
     if args.label.endswith('discovery') and roots.is_file():
         entries = sorted({int(line, 0) for line in roots.read_text().splitlines() if line.strip()})
@@ -60,7 +70,6 @@ def main():
     (args.out/f'{args.label}-startup-result.json').write_text(json.dumps(receipt, indent=2))
     print(json.dumps(receipt, indent=2))
     print(text[-10000:])
-    if fixture:fixture.cleanup()
     if traps or timed_out or code != 0:
         raise SystemExit(1)
 

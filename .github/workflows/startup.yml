@@ -30,6 +30,9 @@ on:
       snapshot_run_id:
         description: Optional prior private diagnostic snapshot run for CRT differential replay
         type: string
+      reference_files_commit:
+        description: Optional exact historical filesystem revision for controlled APFS comparison
+        type: string
 permissions:
   contents: read
   actions: read
@@ -47,8 +50,11 @@ jobs:
       DIFF_ENTRIES: ${{ inputs.differential_entries }}
       TRACE_RETURNS: ${{ inputs.trace_returns }}
       SNAPSHOT_RUN_ID: ${{ inputs.snapshot_run_id }}
+      REFERENCE_FILES_COMMIT: ${{ inputs.reference_files_commit }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Verify startup failure gate
         run: python3 tests/startup_gate_test.py
       - name: Install optional Mac discovery dependency
@@ -59,6 +65,7 @@ jobs:
         run: |
           extra=()
           if [ '${{ inputs.discovery }}' = true ]; then extra=(--discovery-prefix "$(brew --prefix unicorn)"); fi
+          if [ -n "$REFERENCE_FILES_COMMIT" ]; then extra+=(--reference-files-commit "$REFERENCE_FILES_COMMIT"); fi
           python3 tools/startup_build.py --host-check --out build/startup "${extra[@]}"
           build/startup/fnv-startup
       - name: Require private repository and validate approved inputs
@@ -75,6 +82,7 @@ jobs:
         run: |
           extra=()
           if [ '${{ inputs.discovery }}' = true ]; then extra=(--discovery-prefix "$(brew --prefix unicorn)"); fi
+          if [ -n "$REFERENCE_FILES_COMMIT" ]; then extra+=(--reference-files-commit "$REFERENCE_FILES_COMMIT"); fi
           if [ -n "$CACHE_RUN_ID" ]; then
             case "$CACHE_RUN_ID" in *[!0-9]*) exit 1;; esac
             gh run download "$CACHE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name FNV-native-objects-private --dir build/native-objects
@@ -104,28 +112,34 @@ jobs:
         if: always() && inputs.snapshot_run_id != '' && steps.native_build.outcome == 'success'
         run: python3 tools/differential/replay_math_snapshot.py "$RUNNER_TEMP/fnv-private/FalloutNV.exe" build/startup/libfnv-differential.dylib build/reference-snapshots --whole-wrapper --out build/diagnostics/math-wrapper-differential.json
       - name: Execute strict startup with no game Data
-        if: always() && inputs.input_tag != '' && steps.native_build.outcome == 'success'
+        if: always() && inputs.input_tag != '' && inputs.reference_files_commit == '' && steps.native_build.outcome == 'success'
         run: python3 tools/run_startup.py build/startup/fnv-startup "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics
       - name: Discover missing entries on Mac without masking the strict result
-        if: always() && inputs.input_tag != '' && inputs.discovery
+        if: always() && inputs.input_tag != '' && inputs.discovery && inputs.reference_files_commit == ''
         run: |
           test -x build/startup/fnv-discovery
           python3 tools/run_startup.py build/startup/fnv-discovery "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics --label discovery
       - name: Exercise real UI loading with an author-created minimal fixture
-        if: always() && inputs.input_tag != '' && steps.native_build.outcome == 'success'
+        if: always() && inputs.input_tag != '' && inputs.reference_files_commit == '' && steps.native_build.outcome == 'success'
         run: python3 tools/run_startup.py build/startup/fnv-startup "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics --label synthetic
       - name: Reference the same synthetic fixture on Mac
-        if: always() && inputs.input_tag != '' && inputs.discovery && steps.native_build.outcome == 'success'
+        if: always() && inputs.input_tag != '' && inputs.reference_files_commit == '' && inputs.discovery && steps.native_build.outcome == 'success'
         run: python3 tools/run_startup.py build/startup/fnv-discovery "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics --label synthetic-discovery
       - name: Exercise compressed author-created BSA loading
-        if: always() && inputs.input_tag != '' && steps.native_build.outcome == 'success'
+        if: always() && inputs.input_tag != '' && inputs.reference_files_commit == '' && steps.native_build.outcome == 'success'
         run: python3 tools/run_startup.py build/startup/fnv-startup "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics --label synthetic-bsa
       - name: Reference compressed author-created BSA loading
-        if: always() && inputs.input_tag != '' && inputs.discovery && steps.native_build.outcome == 'success'
+        if: always() && inputs.input_tag != '' && inputs.reference_files_commit == '' && inputs.discovery && steps.native_build.outcome == 'success'
         run: python3 tools/run_startup.py build/startup/fnv-discovery "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics --label synthetic-bsa-discovery
       - name: Exercise uncompressed author-created BSA loading
-        if: always() && inputs.input_tag != '' && steps.native_build.outcome == 'success'
+        if: always() && inputs.input_tag != '' && inputs.reference_files_commit == '' && steps.native_build.outcome == 'success'
         run: python3 tools/run_startup.py build/startup/fnv-startup "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics --label synthetic-bsa-raw
+      - name: Reproduce historical filesystem failure on case-sensitive APFS
+        if: always() && inputs.input_tag != '' && inputs.reference_files_commit != '' && steps.native_build.outcome == 'success'
+        run: python3 tools/run_startup.py build/startup/fnv-file-reference "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics --label synthetic-bsa-reference --case-sensitive
+      - name: Compare repaired filesystem on the same case-sensitive fixture
+        if: always() && inputs.input_tag != '' && inputs.reference_files_commit != '' && steps.native_build.outcome == 'success'
+        run: python3 tools/run_startup.py build/startup/fnv-startup "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics --label synthetic-bsa-sensitive --case-sensitive
       - uses: actions/upload-artifact@v4
         if: always() && inputs.input_tag != ''
         with:

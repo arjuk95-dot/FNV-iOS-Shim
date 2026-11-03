@@ -24,6 +24,7 @@ def main():
     parser.add_argument('--cache', type=Path, help='private, verified object cache for this compiler/SDK/header configuration')
     parser.add_argument('--trace-entries', default='', help='comma-separated selected guest entry addresses for read-only state probes')
     parser.add_argument('--trace-returns', default='', help='comma-separated selected callees for read-only post-return probes')
+    parser.add_argument('--reference-files-commit',help='build a separate historical filesystem reference, retaining current translated game objects')
     args = parser.parse_args()
     trace_entries={int(value,0) for value in args.trace_entries.split(',') if value.strip()}
     trace_returns={int(value,0) for value in args.trace_returns.split(',') if value.strip()}
@@ -108,6 +109,15 @@ def main():
         link = [cc, '-isysroot', sdk, *objects, *[v for f in frameworks for v in ('-framework', f)],
                 '-Wl,-stack_size,0x1000000']
         subprocess.run([*link, '-o', str(binary)], check=True)
+        if args.reference_files_commit:
+            if not re.fullmatch('[0-9a-f]{40}',args.reference_files_commit):raise ValueError('Reference must be an exact commit')
+            reference=tmp/'file-shims-reference.c';reference.write_bytes(subprocess.check_output(
+                ['git','show',args.reference_files_commit+':upstream/recomp/host/shims_files.c'],cwd=ROOT))
+            ref_object=tmp/'file-shims-reference.o'
+            subprocess.run([*base,'-c',str(reference),'-o',str(ref_object)],check=True)
+            ref_objects=[str(ref_object) if source==H/'shims_files.c' else obj for source,obj,_ in compiled]
+            subprocess.run([cc,'-isysroot',sdk,*ref_objects,*[v for f in frameworks for v in ('-framework',f)],
+                            '-Wl,-stack_size,0x1000000','-o',str(args.out/'fnv-file-reference')],check=True)
         if args.generated:
             runtime=tmp/'differential-runtime.o'
             subprocess.run([*base,'-c',str(ROOT/'tools/differential/rt_test.c'),'-o',str(runtime)],check=True)
