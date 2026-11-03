@@ -2,6 +2,7 @@
 #import "FNVNativeMedia.h"
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 @interface FNVNativeMovie:NSObject
 @property(nonatomic,strong) AVURLAsset *asset;
 @property(nonatomic,strong) AVPlayer *player;
@@ -41,7 +42,7 @@ uintptr_t fnv_video_open(const char *path){
         return handle;
     }
 }
-double fnv_video_time(uintptr_t handle){FNVNativeMovie *movie=movieFor(handle);double value=CMTimeGetSeconds(movie.player.currentTime);return isfinite(value)&&value>0?value:0;}
+double fnv_video_time(uintptr_t handle){FNVNativeMovie *movie=movieFor(handle);if(!movie)return 0;double value=CMTimeGetSeconds(movie.player.currentTime);return isfinite(value)&&value>0?value:0;}
 int fnv_video_decode(uintptr_t handle,unsigned frame){
     FNVNativeMovie *movie=movieFor(handle);if(!movie || !frame)return 0;
     @synchronized(movie){
