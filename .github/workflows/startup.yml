@@ -21,6 +21,15 @@ on:
       trace_entries:
         description: Optional comma-separated guest entries for read-only receiver/argument probes
         type: string
+      differential_entries:
+        description: Optional comma-separated entries to compare against original x86
+        type: string
+      trace_returns:
+        description: Optional comma-separated callees whose completed returns are logged
+        type: string
+      snapshot_run_id:
+        description: Optional prior private diagnostic snapshot run for CRT differential replay
+        type: string
 permissions:
   contents: read
   actions: read
@@ -35,6 +44,9 @@ jobs:
       EXE_SHA256: ${{ inputs.executable_sha256 }}
       CACHE_RUN_ID: ${{ inputs.cache_run_id }}
       TRACE_ENTRIES: ${{ inputs.trace_entries }}
+      DIFF_ENTRIES: ${{ inputs.differential_entries }}
+      TRACE_RETURNS: ${{ inputs.trace_returns }}
+      SNAPSHOT_RUN_ID: ${{ inputs.snapshot_run_id }}
     steps:
       - uses: actions/checkout@v4
       - name: Verify startup failure gate
@@ -58,6 +70,7 @@ jobs:
           gh release download "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" --pattern fnv-game-inputs.zip --dir "$RUNNER_TEMP/fnv-download"
           python3 tools/game_inputs.py unpack "$RUNNER_TEMP/fnv-download/fnv-game-inputs.zip" "$RUNNER_TEMP/fnv-private" --archive-sha256 "$INPUT_SHA256" --exe-sha256 "$EXE_SHA256"
       - name: Compile native diagnostic with the translated game
+        id: native_build
         if: inputs.input_tag != ''
         run: |
           extra=()
@@ -66,9 +79,27 @@ jobs:
             case "$CACHE_RUN_ID" in *[!0-9]*) exit 1;; esac
             gh run download "$CACHE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name FNV-native-objects-private --dir build/native-objects
           fi
-          python3 tools/startup_build.py --generated "$RUNNER_TEMP/fnv-private/generated" --out build/startup --cache build/native-objects --trace-entries "$TRACE_ENTRIES" "${extra[@]}"
+          python3 tools/startup_build.py --generated "$RUNNER_TEMP/fnv-private/generated" --out build/startup --cache build/native-objects --trace-entries "$TRACE_ENTRIES" --trace-returns "$TRACE_RETURNS" "${extra[@]}"
+      - uses: actions/setup-python@v7
+        if: always() && (inputs.differential_entries != '' || inputs.snapshot_run_id != '') && steps.native_build.outcome == 'success'
+        with:
+          python-version: '3.12'
+      - name: Install x86 reference test dependencies
+        if: always() && (inputs.differential_entries != '' || inputs.snapshot_run_id != '') && steps.native_build.outcome == 'success'
+        run: python3 -m pip install --disable-pip-version-check unicorn==2.1.4 numpy
+      - name: Compare selected translations with original x86
+        if: always() && inputs.differential_entries != '' && steps.native_build.outcome == 'success'
+        run: |
+          mkdir -p build/diagnostics
+          python3 tools/differential/difftest.py "$RUNNER_TEMP/fnv-private/FalloutNV.exe" build/startup/libfnv-differential.dylib tools/differential/ghidra-x86-registers.json build/diagnostics/differential.json --only "$DIFF_ENTRIES" --trials 12 --jobs 2
+      - name: Replay captured CRT math context against original x86
+        if: always() && inputs.snapshot_run_id != '' && steps.native_build.outcome == 'success'
+        run: |
+          case "$SNAPSHOT_RUN_ID" in *[!0-9]*) exit 1;; esac
+          gh run download "$SNAPSHOT_RUN_ID" --repo "$GITHUB_REPOSITORY" --name FNV-startup-diagnostics-private --dir build/reference-snapshots
+          python3 tools/differential/replay_math_snapshot.py "$RUNNER_TEMP/fnv-private/FalloutNV.exe" build/startup/libfnv-differential.dylib build/reference-snapshots --out build/diagnostics/math-differential.json
       - name: Execute strict startup with no game Data
-        if: inputs.input_tag != ''
+        if: always() && inputs.input_tag != '' && steps.native_build.outcome == 'success'
         run: python3 tools/run_startup.py build/startup/fnv-startup "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics
       - name: Discover missing entries on Mac without masking the strict result
         if: always() && inputs.input_tag != '' && inputs.discovery

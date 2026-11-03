@@ -23,8 +23,10 @@ def main():
     parser.add_argument('--jobs', type=int, default=2)
     parser.add_argument('--cache', type=Path, help='private, verified object cache for this compiler/SDK/header configuration')
     parser.add_argument('--trace-entries', default='', help='comma-separated selected guest entry addresses for read-only state probes')
+    parser.add_argument('--trace-returns', default='', help='comma-separated selected callees for read-only post-return probes')
     args = parser.parse_args()
     trace_entries={int(value,0) for value in args.trace_entries.split(',') if value.strip()}
+    trace_returns={int(value,0) for value in args.trace_returns.split(',') if value.strip()}
     if not args.host_check and not (args.generated and (args.generated/'table.c').is_file()
                                    and (args.generated/'stubs.c').is_file()):
         parser.error('Provide a complete --generated directory or use --host-check')
@@ -66,6 +68,20 @@ def main():
                 content=re.sub(rb'RT_ENTER\(0x([0-9a-f]+)u\);',probe,content)
                 if transformed:
                     content=content.replace(b'#include "rt.h"',b'#include "rt.h"\nvoid rt_diag_entry(CPU *,uint32_t);',1)
+            if trace_returns and args.generated and source.parent.resolve()==args.generated.resolve():
+                site=0;returned=False
+                def returned_call(match):
+                    nonlocal site,returned
+                    if match.group(1):
+                        site=int(match.group(1),16);return match.group(0)
+                    callee=int(match.group(2),16)
+                    if callee not in trace_returns:return match.group(0)
+                    returned=True
+                    return match.group(0)+f'rt_diag_return(c,0x{site:x}u,0x{callee:x}u);'.encode()
+                content=re.sub(rb'L_([0-9a-f]+):|g_([0-9a-f]+)\(c\);',returned_call,content)
+                if returned:
+                    transformed=True
+                    content=content.replace(b'#include "rt.h"',b'#include "rt.h"\nvoid rt_diag_return(CPU *,uint32_t,uint32_t);',1)
             key=hashlib.sha256(config+source.name.encode()+content).hexdigest()
             stored=cache/(key+'.o') if cache else None
             if stored and stored.is_file() and hashlib.sha256(stored.read_bytes()).hexdigest()==old_manifest.get(stored.name):
@@ -92,6 +108,13 @@ def main():
         link = [cc, '-isysroot', sdk, *objects, *[v for f in frameworks for v in ('-framework', f)],
                 '-Wl,-stack_size,0x1000000']
         subprocess.run([*link, '-o', str(binary)], check=True)
+        if args.generated:
+            runtime=tmp/'differential-runtime.o'
+            subprocess.run([*base,'-c',str(ROOT/'tools/differential/rt_test.c'),'-o',str(runtime)],check=True)
+            test_objects=[obj for source,obj,_ in compiled if source==R/'rt_dispatch.c'
+                          or source.parent.resolve()==args.generated.resolve()]
+            subprocess.run([cc,'-isysroot',sdk,'-dynamiclib',*test_objects,str(runtime),
+                            '-o',str(args.out/'libfnv-differential.dylib')],check=True)
         if args.discovery_prefix:
             prefix = args.discovery_prefix.resolve()
             assert (prefix/'include/unicorn/unicorn.h').is_file(), 'Unicorn C headers missing'

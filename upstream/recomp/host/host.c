@@ -142,6 +142,10 @@ void rt_diag_entry(CPU *c,uint32_t entry) {
     if(object<=0xfffffff0u)
         fprintf(stderr,"[entry-object] entry=%#x receiver=%#x words=%#x,%#x,%#x,%#x\n",entry,object,G32(object),G32(object+4),G32(object+8),G32(object+12));
 }
+void rt_diag_return(CPU *c,uint32_t site,uint32_t callee) {
+    fprintf(stderr,"[callee-return] site=%#x callee=%#x eax=%#x ecx=%#x esp=%#x ebp=%#x\n",
+        site,callee,REG(c,0),REG(c,4),REG(c,16),REG(c,20));
+}
 
 int fnv_run_game(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: %s game.exe [args]\n", argv[0]); return 2; }
