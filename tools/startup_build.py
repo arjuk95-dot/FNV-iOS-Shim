@@ -42,7 +42,7 @@ def main():
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
             objects = list(pool.map(compile_one, enumerate(sources)))
         frameworks = ['Foundation', 'AVFoundation', 'CoreGraphics', 'CoreMedia', 'CoreVideo', 'ImageIO', 'UniformTypeIdentifiers']
-        subprocess.run([cc, *objects, *[v for f in frameworks for v in ('-framework', f)],
+        subprocess.run([cc, '-isysroot', sdk, *objects, *[v for f in frameworks for v in ('-framework', f)],
                         '-Wl,-stack_size,0x1000000', '-o', str(binary)], check=True)
     print(binary.resolve())
 
