@@ -428,10 +428,13 @@ static void reap(void) {                                           // called onc
 
 static void Swap_GetBackBuffer(CPU *c) { uint32_t s = g_d3d.backbuffer; addref(s); P32(ARG(c, 3), s); RET(c, 0, 4); }
 static void Swap_GetPresentParameters(CPU *c) { memcpy(MEM + ARG(c, 1), g_d3d.pp, 56); RET(c, 0, 2); }
+// Probe omits synchronization shims; the game supplies the strong implementation.
+__attribute__((weak)) void host_sync_diagnostics(CPU *c) { (void)c; }
 static void present_guest(CPU *c, unsigned arguments, const char *interface) {
     static unsigned seen;
     unsigned first = !seen++;
     uint32_t caller = G32(REG(c,16));
+    host_sync_diagnostics(c);
     if (first) fprintf(stderr,"[checkpoint] first Present entered interface=%s guest_return=%#x\n",interface,caller);
     d3d_backend_present(&g_d3d); reap(); RET(c, 0, arguments);
     if (first) fprintf(stderr,"[checkpoint] first Present returned hresult=0 guest_return=%#x\n",caller);

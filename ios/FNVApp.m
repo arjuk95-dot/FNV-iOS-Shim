@@ -143,6 +143,7 @@ static void gameButton(UIButton *button, BOOL down) {
     }
     setenv("FNV_ROOT", root.fileSystemRepresentation, 1);
     setenv("FNV_TRACE_FILES", "1", 1);
+    setenv("FNV_TRACE_SYNC", "1", 1);
     // An empty file is an explicit opt-in to testing the game's controller path.
     fnv_use_analog([NSFileManager.defaultManager fileExistsAtPath:[root URLByAppendingPathComponent:@"analog-input.flag"].path]);
     [self addActions:view];

@@ -36,6 +36,54 @@ typedef struct {
     int suspend;                   // thread: >0 while suspended (CREATE_SUSPENDED / SuspendThread)
 } Obj;
 
+// Snapshots are written by the owning thread at shim boundaries. Never sample another
+// thread's live CPU/register file or unsynchronised RT_CALLTRACE ring.
+typedef struct { uint32_t tid, caller, object, trace[8]; uint64_t transitions; const char *state; } SyncDiag;
+static SyncDiag diagnostics[64];
+static unsigned diagnostic_count;
+static pthread_mutex_t diagnostic_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Thread_local SyncDiag *my_diagnostic;
+static _Thread_local unsigned diagnostic_calls;
+static int diagnostic_enabled(void) { return getenv("FNV_TRACE_SYNC") != NULL; }
+static void diagnostic_state(CPU *c, const char *state, uint32_t object) {
+    if (!diagnostic_enabled()) return;
+    pthread_mutex_lock(&diagnostic_lock);
+    if (!my_diagnostic && diagnostic_count < 64) {
+        my_diagnostic = &diagnostics[diagnostic_count++];
+        my_diagnostic->tid = G32(REG(c,272) + 0x24);
+    }
+    if (my_diagnostic) {
+        my_diagnostic->state=state; my_diagnostic->object=object;
+        uint32_t sp=REG(c,R_ESP);
+        my_diagnostic->caller=sp<=0xfffffffbu?G32(sp):0;
+        my_diagnostic->transitions++;
+#ifdef RT_CALLTRACE
+        for(unsigned i=0;i<8;i++) my_diagnostic->trace[i]=rt_ct_pos>i?rt_ct_ring[(rt_ct_pos-1-i)&255]:0;
+#endif
+    }
+    pthread_mutex_unlock(&diagnostic_lock);
+}
+void host_sync_boundary(CPU *c) {
+    if (!(++diagnostic_calls & 8191)) diagnostic_state(c,"api-progress",0);
+}
+void host_sync_diagnostics(CPU *c) {
+    static uint64_t last;
+    if (!diagnostic_enabled()) return;
+    uint64_t now=clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+    if (now-last < 10000000000ull) return;
+    last=now;
+    diagnostic_state(c,"present",0);
+    pthread_mutex_lock(&diagnostic_lock);
+    for(unsigned i=0;i<diagnostic_count;i++) {
+        SyncDiag *d=&diagnostics[i];
+        fprintf(stderr,"[sync-snapshot] tid=%u state=%s object=%#x caller=%#x transitions=%llu recent_entries=",
+            d->tid,d->state,d->object,d->caller,(unsigned long long)d->transitions);
+        for(unsigned j=0;j<8;j++)fprintf(stderr,"%#x%s",d->trace[j],j==7?"\n":",");
+    }
+    pthread_mutex_unlock(&diagnostic_lock);
+    rt_calltrace_dump();
+}
+
 static Obj *obj_new(void) {
     Obj *o = calloc(1, sizeof *o);
     pthread_mutex_init(&o->m, NULL);
@@ -53,7 +101,17 @@ static int try_acquire(int type, Obj *o) {
         return 0;
     case H_THREAD: return o->done;
     }
-    return 1;
+    return 0;
+}
+
+static int can_acquire(int type, Obj *o) {
+    switch(type) {
+    case H_EVENT: return o->signaled;
+    case H_SEMA: return o->count>0;
+    case H_MUTEX: return !o->owned || pthread_equal(o->owner,pthread_self());
+    case H_THREAD: return o->done;
+    default: return 0;
+    }
 }
 
 static void deadline(struct timespec *ts, uint32_t ms) {
@@ -66,8 +124,8 @@ static void deadline(struct timespec *ts, uint32_t ms) {
 // 0 = WAIT_OBJECT_0, 0x102 = WAIT_TIMEOUT
 static uint32_t wait_one(uint32_t h, uint32_t ms) {
     int t = handle_type(h);
-    Obj *o = t ? handle_get(h, t) : NULL;
-    if (!o) return 0xFFFFFFFFu;
+    Obj *o = t>=H_EVENT && t<=H_THREAD ? handle_get(h, t) : NULL;
+    if (!o) { SETERR(6); return 0xFFFFFFFFu; }
     struct timespec ts; deadline(&ts, ms);
     pthread_mutex_lock(&o->m);
     while (!try_acquire(t, o)) {
@@ -109,21 +167,42 @@ SHIM(CreateMutexA) {
     if (ARG(c, 1)) { o->owned = 1; o->owner = pthread_self(); o->recursion = 1; }
     RET(c, handle_new(H_MUTEX, o), 3);
 }
-SHIM(WaitForSingleObject) { RET(c, wait_one(ARG(c, 0), ARG(c, 1)), 2); }
+SHIM(WaitForSingleObject) {
+    uint32_t h=ARG(c,0),ms=ARG(c,1);
+    if(ms)diagnostic_state(c,"wait-one",h);
+    uint32_t result=wait_one(h,ms);
+    if(ms)diagnostic_state(c,"wait-returned",h);
+    RET(c,result,2);
+}
 SHIM(WaitForMultipleObjects) {
     uint32_t n = ARG(c, 0), arr = ARG(c, 1), all = ARG(c, 2), ms = ARG(c, 3);
+    Obj *objects[64]; int types[64]; unsigned order[64];
+    if(!n || n>64 || !arr || arr>0xffffffffu-4*n) { SETERR(87); RET(c,0xffffffffu,4); return; }
+    for(unsigned i=0;i<n;i++) {
+        uint32_t h=G32(arr+4*i);types[i]=handle_type(h);order[i]=i;
+        objects[i]=types[i]>=H_EVENT&&types[i]<=H_THREAD?handle_get(h,types[i]):NULL;
+        if(!objects[i]) { SETERR(6); RET(c,0xffffffffu,4); return; }
+        for(unsigned j=0;j<i;j++)if(objects[j]==objects[i]) { SETERR(87); RET(c,0xffffffffu,4); return; }
+    }
+    for(unsigned i=1;i<n;i++)for(unsigned j=i;j>0 && (uintptr_t)objects[order[j]]<(uintptr_t)objects[order[j-1]];j--) {
+        unsigned swap=order[j];order[j]=order[j-1];order[j-1]=swap;
+    }
+    if(ms)diagnostic_state(c,all?"wait-all":"wait-any",arr);
     struct timespec start; clock_gettime(CLOCK_MONOTONIC, &start);
     for (;;) {      // simple polling implementation: correct, not fast; revisit if it shows up in profiles
         if (all) {
-            uint32_t ok = 1;
-            for (uint32_t i = 0; i < n; i++) ok &= wait_one(G32(arr + 4 * i), 0) == 0;
-            if (ok) { RET(c, 0, 4); return; }
+            for(unsigned i=0;i<n;i++)pthread_mutex_lock(&objects[order[i]]->m);
+            int ok=1;
+            for(unsigned i=0;i<n;i++)if(!can_acquire(types[i],objects[i]))ok=0;
+            if(ok)for(unsigned i=0;i<n;i++)try_acquire(types[i],objects[i]);
+            for(unsigned i=n;i>0;i--)pthread_mutex_unlock(&objects[order[i-1]]->m);
+            if (ok) { if(ms)diagnostic_state(c,"wait-returned",arr); RET(c, 0, 4); return; }
         } else {
-            for (uint32_t i = 0; i < n; i++) if (wait_one(G32(arr + 4 * i), 0) == 0) { RET(c, i, 4); return; }
+            for (uint32_t i = 0; i < n; i++) if (wait_one(G32(arr + 4 * i), 0) == 0) { if(ms)diagnostic_state(c,"wait-returned",arr); RET(c, i, 4); return; }
         }
         struct timespec now; clock_gettime(CLOCK_MONOTONIC, &now);
-        uint64_t el = (uint64_t)(now.tv_sec - start.tv_sec) * 1000 + (uint64_t)(now.tv_nsec - start.tv_nsec) / 1000000;
-        if (ms != 0xFFFFFFFFu && el >= ms) { RET(c, 0x102, 4); return; }
+        int64_t ns=(int64_t)(now.tv_sec-start.tv_sec)*1000000000ll+now.tv_nsec-start.tv_nsec;
+        if (ms != 0xFFFFFFFFu && ns/1000000 >= ms) { if(ms)diagnostic_state(c,"wait-timeout",arr); RET(c, 0x102, 4); return; }
         usleep(200);
     }
 }
@@ -150,7 +229,15 @@ static pthread_mutex_t *cs_get(uint32_t a) {
 SHIM(InitializeCriticalSection) { memset(MEM + ARG(c, 0), 0, 24); cs_get(ARG(c, 0)); RET(c, 0, 1); }
 SHIM(InitializeCriticalSectionAndSpinCount) { memset(MEM + ARG(c, 0), 0, 24); cs_get(ARG(c, 0)); RET(c, 1, 2); }
 SHIM(DeleteCriticalSection) { RET(c, 0, 1); }
-SHIM(EnterCriticalSection) { pthread_mutex_lock(cs_get(ARG(c, 0))); RET(c, 0, 1); }
+SHIM(EnterCriticalSection) {
+    uint32_t address=ARG(c,0);pthread_mutex_t *mutex=cs_get(address);
+    if(pthread_mutex_trylock(mutex)) {
+        diagnostic_state(c,"critical-section",address);
+        pthread_mutex_lock(mutex);
+        diagnostic_state(c,"critical-acquired",address);
+    }
+    RET(c,0,1);
+}
 SHIM(LeaveCriticalSection) { pthread_mutex_unlock(cs_get(ARG(c, 0))); RET(c, 0, 1); }
 SHIM(TryEnterCriticalSection) { RET(c, pthread_mutex_trylock(cs_get(ARG(c, 0))) == 0, 1); }
 
@@ -167,28 +254,41 @@ SHIM(InterlockedCompareExchange) {
 }
 
 // ---- threads ---------------------------------------------------------------------------------
-typedef struct { uint32_t start, param; Obj *obj; uint32_t tid; } ThreadStart;
+typedef struct { uint32_t start, param; Obj *obj; uint32_t tid; CPU *cpu; uint32_t exit_code; } ThreadStart;
+static _Thread_local ThreadStart *current_thread;
 static uint32_t next_tid = 2;
 extern int host_run_guest(CPU *c, uint32_t entry);   // host.c: trap-guarded call
 
+static void thread_finished(void *p) {
+    ThreadStart *ts=p;
+    pthread_mutex_lock(&ts->obj->m);
+    ts->obj->done=1;ts->obj->exit_code=ts->exit_code;
+    pthread_cond_broadcast(&ts->obj->cv);
+    pthread_mutex_unlock(&ts->obj->m);
+    fprintf(stderr,"[thread] completed tid=%u start=%#x exit=%#x\n",ts->tid,ts->start,ts->exit_code);
+    if(ts->cpu)diagnostic_state(ts->cpu,"completed",ts->exit_code);
+    current_thread=NULL;free(ts->cpu);free(ts);
+}
 static void *thread_main(void *p) {
     ThreadStart *ts = p;
+    current_thread=ts;
+    pthread_cleanup_push(thread_finished,ts);
     if (!getenv("FNV_NO_QOS")) pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);   // game workers
     pthread_mutex_lock(&ts->obj->m);                      // CREATE_SUSPENDED: wait for ResumeThread
     while (ts->obj->suspend > 0) pthread_cond_wait(&ts->obj->cv, &ts->obj->m);
     pthread_mutex_unlock(&ts->obj->m);
     CPU *c = calloc(1, sizeof *c);
+    ts->cpu=c;
     host_thread_init(c, 1 << 20);
     P32(REG(c, 272) + 0x24, ts->tid);
     ST(c->r + 4256, 0x027F, 2);
     uint32_t esp = REG(c, R_ESP) - 8;
     P32(esp, HOST_EXIT_THUNK); P32(esp + 4, ts->param);
     SETREG(c, R_ESP, esp);
-    host_run_guest(c, ts->start);
-    pthread_mutex_lock(&ts->obj->m);
-    ts->obj->done = 1; ts->obj->exit_code = REG(c, R_EAX);
-    pthread_cond_broadcast(&ts->obj->cv);
-    pthread_mutex_unlock(&ts->obj->m);
+    diagnostic_state(c,"started",ts->start);
+    int result=host_run_guest(c, ts->start);
+    ts->exit_code=result?1067:REG(c,R_EAX);
+    pthread_cleanup_pop(1);
     return NULL;
 }
 SHIM(CreateThread) {
@@ -197,10 +297,20 @@ SHIM(CreateThread) {
     ts->tid = __atomic_fetch_add(&next_tid, 1, __ATOMIC_SEQ_CST);
     if (ARG(c, 4) & 4) ts->obj->suspend = 1;
     uint32_t h = handle_new(H_THREAD, ts->obj);
-    if (ARG(c, 5)) P32(ARG(c, 5), ts->tid);
-    fprintf(stderr, "[thread] CreateThread start %#x param %#x flags %#x -> handle %#x tid %u\n", ts->start, ts->param, ARG(c, 4), h, ts->tid);
-    pthread_attr_t at; pthread_attr_init(&at); pthread_attr_setstacksize(&at, 64u << 20);
-    pthread_t th; pthread_create(&th, &at, thread_main, ts); pthread_detach(th);
+    uint32_t tid=ts->tid,start=ts->start,param=ts->param;
+    pthread_attr_t at; pthread_attr_init(&at);
+    int error=pthread_attr_setstacksize(&at,64u<<20);
+    pthread_t th;
+    if(!error)error=pthread_create(&th,&at,thread_main,ts);
+    pthread_attr_destroy(&at);
+    if(error) {
+        fprintf(stderr,"[thread] CreateThread FAILED start=%#x pthread_error=%d (%s)\n",start,error,strerror(error));
+        handle_close(h);pthread_cond_destroy(&ts->obj->cv);pthread_mutex_destroy(&ts->obj->m);free(ts->obj);free(ts);
+        SETERR(error==EINVAL?87:8);RET(c,0,6);return;
+    }
+    pthread_detach(th);
+    if (ARG(c, 5)) P32(ARG(c, 5), tid);
+    fprintf(stderr, "[thread] CreateThread start %#x param %#x flags %#x -> handle %#x tid %u\n",start,param,ARG(c,4),h,tid);
     RET(c, h, 6);
 }
 SHIM(ResumeThread) {
@@ -223,7 +333,12 @@ SHIM(GetExitCodeThread) {
     if (o) P32(ARG(c, 1), o->done ? o->exit_code : 259 /* STILL_ACTIVE */);
     RET(c, o != NULL, 2);
 }
-SHIM(ExitThread) { fprintf(stderr, "[host] ExitThread(%u)\n", ARG(c, 0)); pthread_exit(NULL); }
+SHIM(ExitThread) {
+    uint32_t code=ARG(c,0);
+    fprintf(stderr,"[host] ExitThread(%u)\n",code);
+    if(current_thread)current_thread->exit_code=code;
+    pthread_exit(NULL);
+}
 SHIM(CloseHandle) {
     uint32_t h = ARG(c, 0);
     if (handle_type(h) == H_THREAD) {

@@ -47,6 +47,7 @@ static uint16_t rd16(uint32_t a) { uint16_t v; memcpy(&v, MEM + a, 2); return v;
 // ---- imports ---------------------------------------------------------------------------------
 HostImport host_imports[MAX_IMPORTS];
 int host_import_count;
+void host_sync_boundary(CPU *c);
 
 static void bind_imports(uint32_t base) {
     uint32_t pe = base + rd32(base + 0x3C);
@@ -75,6 +76,7 @@ void rt_import_call(CPU *c, uint32_t addr) {
     int i = (int)((addr - IMPORT_THUNK_BASE) / 4);
     if (i < 0 || i >= host_import_count) rt_trap(c, TRAP_NOFN, addr);
     HostImport *hi = &host_imports[i];
+    host_sync_boundary(c);
     if (!hi->fn) {
         fprintf(stderr, "[host] unimplemented import %s!%s\n", hi->dll, hi->name);
         rt_trap(c, TRAP_IMPORT, addr);
