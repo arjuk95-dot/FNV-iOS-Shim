@@ -1,0 +1,24 @@
+name: Build iPhone shim probe
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/run.sh
+      - run: python3 tools/build.py probe
+      - name: Check device platform and UIKit linkage
+        run: |
+          set -eu
+          unzip -q build/FNVShimProbe.ipa -d "$RUNNER_TEMP/inspect"
+          bin="$RUNNER_TEMP/inspect/Payload/FNVShimProbe.app/FNVShimProbe"
+          xcrun vtool -show-build "$bin" | grep -E 'platform IOS$'
+          xcrun otool -L "$bin" | grep 'UIKit.framework'
+          if xcrun otool -L "$bin" | grep -q 'AppKit.framework'; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FNVShimProbe-iPhone
+          path: build/FNVShimProbe.ipa
+          retention-days: 7
