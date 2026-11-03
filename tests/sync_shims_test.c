@@ -8,6 +8,10 @@
 uint8_t *MEM;
 _Thread_local uint32_t host_last_error;
 extern const ShimTable sync_shims;
+void host_sync_diagnostics(CPU *) __attribute__((weak_import));
+#ifdef RT_CALLTRACE
+_Thread_local uint32_t rt_ct_ring[256],rt_ct_pos;
+#endif
 static _Thread_local uint32_t call_sp;
 static uint32_t next_sp=0x1000,next_guest=0x80000,entries;
 static int failures;
@@ -35,7 +39,7 @@ static uint64_t ns(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);ret
 static void *signal_later(void *p){usleep(20000);CALL("SetEvent",(uint32_t)(uintptr_t)p);return NULL;}
 static uint32_t event(int manual,int signaled){return CALL("CreateEventA",0,manual,signaled,0);}
 int main(void){
-    MEM=calloc(1,4<<20);setenv("FNV_NO_QOS","1",1);
+    MEM=calloc(1,4<<20);setenv("FNV_NO_QOS","1",1);setenv("FNV_TRACE_SYNC","1",1);
     uint32_t a=event(0,1),b=event(0,0);P32(0x50000,a);P32(0x50004,b);
     check("wait-all unsatisfied returns timeout",CALL("WaitForMultipleObjects",2,0x50000,1,0)==0x102);
     check("wait-all preserves auto-reset signal on timeout",CALL("WaitForSingleObject",a,0)==0);
@@ -62,5 +66,12 @@ int main(void){
     uint32_t count=__atomic_load_n(&entries,__ATOMIC_RELAXED);h=CALL("CreateThread",0,0,1,0,4,0);
     check("CREATE_SUSPENDED does not execute early",h&&CALL("WaitForSingleObject",h,20)==0x102&&__atomic_load_n(&entries,__ATOMIC_RELAXED)==count);
     check("ResumeThread releases suspended worker",CALL("ResumeThread",h)==1&&CALL("WaitForSingleObject",h,1000)==0);
+    if(host_sync_diagnostics){
+        CPU snapshot={0};SETREG(&snapshot,R_ESP,0x60000);SETREG(&snapshot,272,0x61000);P32(0x61024,1);P32(0x60000,0x401123);
+#ifdef RT_CALLTRACE
+        rt_ct_ring[0]=0x401000;rt_ct_ring[1]=0x401001;rt_ct_ring[2]=0x401002;rt_ct_pos=3;
+#endif
+        host_sync_diagnostics(&snapshot);
+    }
     return failures?1:0;
 }
