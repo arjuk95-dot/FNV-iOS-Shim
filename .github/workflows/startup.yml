@@ -23,6 +23,7 @@ on:
         type: string
 permissions:
   contents: read
+  actions: read
 jobs:
   startup:
     runs-on: macos-15
