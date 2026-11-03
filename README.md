@@ -1,6 +1,6 @@
 # Fallout New Vegas · iPhone host shim
 
-A source port of the public Apple Silicon host that keeps its D3D9-to-Metal renderer and Win32 compatibility layer. The iPhone supplies a UIKit window, app lifecycle, a movable guest address space and native relative touch input. This is an experimental bring-your-own-game build kit. It contains a hardware probe and a separate game target. This revision has passed host-side tests on Linux. An Apple SDK build, a device graphics test and actual game boot are pending.
+A source port of the public Apple Silicon host that keeps its D3D9-to-Metal renderer and Win32 compatibility layer. The iPhone supplies a UIKit window, app lifecycle, a movable guest address space and native relative touch input. This is an experimental bring-your-own-game build kit with a hardware probe and separate game target. On the tested iPhone/LiveContainer installation, the probe passes graphics/input/lifecycle checks and game build 5 reaches a visible main menu that accepts New Game. That attempt loops at loading; a loaded game, movement and look remain unverified. Build 6 repairs demonstrated synchronization defects and adds bounded loading diagnostics; its device result is pending. DirectSound output is silent, Vorbis decoding and Bink playback are not implemented.
 
 ## Try the hardware probe first
 
@@ -8,7 +8,7 @@ On a Mac with Xcode 16 or newer selected and an iPhoneOS SDK, unzip the kit and 
 
     python3 tools/build.py probe
 
-Output is build/FNVShimProbe.ipa, packaged for a device and ready for personal signing. From Windows, you can instead put the extracted kit's contents at the root of a new GitHub repository (keep the .github folder), open Actions → Build iPhone shim probe → Run workflow, and download the IPA artifact if the build succeeds. The workflow needs no commercial game files. Use SideStore to sign and install the probe on the iPhone. Test direct sideload first. LiveContainer compatibility has not been tested.
+Output is build/FNVShimProbe.ipa, packaged for a device and ready for personal signing. From Windows, you can instead put the extracted kit's contents at the root of a new GitHub repository (keep the .github folder), open Actions → Build iPhone shim probe → Run workflow, and download the IPA artifact if the build succeeds. The workflow needs no commercial game files. Use SideStore to sign and install the probe on the iPhone. LiveContainer probe compatibility has been tested on the owner's installation; this is separate from gameplay acceptance.
 
 A successful device run should show a colored field. Drag on the right to vary red and green. Lift and re-touch elsewhere and the colors should stay put until you move. Deflect the left thumb to vary blue independently. These changes go through the original host's simulated COM device, Clear and Present, using the Metal backend on iOS. The left stick is polled through the XInput shim. This is a graphics and input check, with no game code. An allocation failure or untranslated game entry is a diagnostic result; see the app's Documents/fnv.log. The probe only touches a small fraction of the requested 4 GiB virtual region.
 
@@ -22,7 +22,9 @@ Use the unencrypted 32-bit PC executable and Data directory from the same instal
         mkdir -p "$WORK/ghidra" "$WORK/generated"
         "$HEADLESS" "$WORK/ghidra" fnv -import "$EXE"
         "$HEADLESS" "$WORK/ghidra" fnv -process "$(basename "$EXE")" -noanalysis -readOnly -scriptPath "$RECOMP/ghidra_scripts" -postScript DumpPcode.java "$WORK/all.jsonl" all
-        python3 "$RECOMP/recomp/emit.py" "$WORK/all.jsonl" "$WORK/generated"
+        python3 tools/translate/emit.py "$WORK/all.jsonl" "$WORK/generated"
+
+   The basic import/export commands do not repair incomplete analysis. Follow [the maintained emitter and analysis recipe](tools/translate/README.md), including no-return/fall-through and typed computed-target analysis, before relying on a whole-game generation. Preserve the original upstream checkout. Entry counts alone do not validate behavior.
 
 3. In the kit directory run:
 
@@ -36,7 +38,9 @@ Use the unencrypted 32-bit PC executable and Data directory from the same instal
 
 The right side feeds displacement to input_mouse_move. The default game configuration keeps the guest in keyboard/mouse mode. The left side supplies eight-direction WASD movement in this mode. Buttons cover menu arrows, Enter, Back, Use, Pip-Boy, Fire and Aim. For true analog movement, add an empty analog-input.flag file beside FalloutNV.exe and relaunch. This exposes virtual XInput controller zero. The probe exercises both axes together with relative look. The game's own controller-mode branch may discard mouse motion; mixed-input gameplay still needs to be traced and verified against the same executable. Context-aware menu touch, physical controllers and gyro are outside this first revision.
 
-The game loop runs on a worker thread. UIKit owns the main thread and the CAMetalLayer. The host requests 4 GiB of contiguous virtual space at an OS-selected base and uses 32-bit guest offsets. An allocation on Linux cannot establish available virtual or resident memory on a signed iPhone app. Three 192 MiB renderer buffers remain an on-device memory risk in the game target. The diagnostic uses smaller buffers. The no-JIT build deliberately traps on missing translated entries. Use each address to improve the static analysis and regenerate. Static coverage needed for the title screen or full gameplay has not been measured here. First-device checks also include compressed texture formats, graphics pipeline creation, missing settings or saves, and suspend/resume. The upstream audio and video implementations are incomplete.
+The game loop runs on a worker thread. UIKit owns the main thread and the CAMetalLayer. The host requests 4 GiB of contiguous virtual space at an OS-selected base and uses 32-bit guest offsets. Phone build 5 has exercised that allocation, archive loading, Metal pipelines and menu rendering; it has not established loaded-world memory/performance behavior. Three 192 MiB renderer buffers remain an on-device memory concern in the game target. The diagnostic uses smaller buffers. The no-JIT build deliberately traps on missing translated entries, preserving the reason, target and guest caller. Use demonstrated patterns to improve static analysis and regenerate; a Mac-only Unicorn reference is available for discovery. The exercised startup paths use native static translation on iOS. Full gameplay coverage remains unverified.
+
+`FNV_TRACE_SYNC` enables periodic Present snapshots of worker/wait states, guest wait callers and recent entry history captured by each owning thread. Entry history is not a reconstructed call stack. Threads blocked before their first guest entry and pure guest loops without API boundaries require additional evidence. `FNV_TRACE_FILES` records requested/resolved paths and open errors. Both are enabled in the current game app for the loading investigation. File shims resolve existing path components case-insensitively to match Windows on the phone's case-sensitive storage.
 
 ## Repeat the host checks
 
@@ -50,6 +54,8 @@ first, then `apply .text <callee>` on the private project before exporting again
 Keep executable-specific addresses and exported code outside this repository.
 
     bash tests/run.sh
+
+On a Mac, `python3 tests/file_shims_case_test.py` exercises real file APIs on a case-sensitive APFS fixture. `python3 tests/sync_shims_test.py` compares actual pthread/wait behavior against the recorded pre-repair module, including wait-all signal consumption, explicit thread completion, suspended creation/resume, timeout boundaries and diagnostic snapshots. Neither test supplies original game assets or establishes gameplay success.
 
 The suite checks touch math against upstream input.c and runs a synthetic guest call sequence using the real COM table builder, gamepad state, guest heap, device creation, clear and present. It asserts the merged swipe and analog values at the renderer boundary for three frames using a headless backend. The iPhone probe uses the real Metal backend for the same call sequence.
 
