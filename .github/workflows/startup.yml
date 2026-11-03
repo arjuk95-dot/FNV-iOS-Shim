@@ -11,6 +11,10 @@ on:
       executable_sha256:
         description: Exact locally analyzed executable SHA-256
         type: string
+      discovery:
+        description: Also link the separate Mac-only Unicorn discovery binary
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -24,10 +28,15 @@ jobs:
       EXE_SHA256: ${{ inputs.executable_sha256 }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install optional Mac discovery dependency
+        if: inputs.discovery
+        run: brew install unicorn
       - name: Check native diagnostic host without game inputs
         if: inputs.input_tag == ''
         run: |
-          python3 tools/startup_build.py --host-check --out build/startup
+          extra=()
+          if [ '${{ inputs.discovery }}' = true ]; then extra=(--discovery-prefix "$(brew --prefix unicorn)"); fi
+          python3 tools/startup_build.py --host-check --out build/startup "${extra[@]}"
           build/startup/fnv-startup
       - name: Require private repository and validate approved inputs
         if: inputs.input_tag != ''
@@ -39,10 +48,18 @@ jobs:
           python3 tools/game_inputs.py unpack "$RUNNER_TEMP/fnv-download/fnv-game-inputs.zip" "$RUNNER_TEMP/fnv-private" --archive-sha256 "$INPUT_SHA256" --exe-sha256 "$EXE_SHA256"
       - name: Compile native diagnostic with the translated game
         if: inputs.input_tag != ''
-        run: python3 tools/startup_build.py --generated "$RUNNER_TEMP/fnv-private/generated" --out build/startup
+        run: |
+          extra=()
+          if [ '${{ inputs.discovery }}' = true ]; then extra=(--discovery-prefix "$(brew --prefix unicorn)"); fi
+          python3 tools/startup_build.py --generated "$RUNNER_TEMP/fnv-private/generated" --out build/startup "${extra[@]}"
       - name: Execute strict startup with no game Data
         if: inputs.input_tag != ''
         run: python3 tools/run_startup.py build/startup/fnv-startup "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics
+      - name: Discover missing entries on Mac without masking the strict result
+        if: always() && inputs.input_tag != '' && inputs.discovery
+        run: |
+          test -x build/startup/fnv-discovery
+          python3 tools/run_startup.py build/startup/fnv-discovery "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics --label discovery
       - uses: actions/upload-artifact@v4
         if: always() && inputs.input_tag != ''
         with:

@@ -24,6 +24,12 @@ Data is uploaded. This can reveal startup gaps before another iPhone install;
 it cannot establish title-screen boot, iPhone graphics or gameplay. An exit or
 timeout caused by missing game files must be investigated separately.
 
+The optional `discovery` mode additionally links the pinned upstream Unicorn
+fallback into a separate **Mac-only diagnostic binary**, reusing the compiled
+objects. It can collect multiple missed entries in one run. Its result never
+changes a failed strict test into a pass, and it is never linked into the iPhone
+IPA. The one-day private diagnostic artifact includes the recorded entries.
+
 The pinned upstream also supplies `FixNoReturn.java`, `ResolveJumpTables.java`
 and `FixEntries.java`. Use them on a private working project, inspect their
 results and re-export before testing. Their completion is not a substitute for

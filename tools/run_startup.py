@@ -18,11 +18,12 @@ def main():
     parser.add_argument('exe', type=Path)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--timeout', type=int, default=60)
+    parser.add_argument('--label', choices=['strict', 'discovery'], default='strict')
     args = parser.parse_args()
     binary, exe = args.binary.resolve(), args.exe.resolve()
     args.out.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, FNV_ROOT=str(exe.parent), FNV_TRACE_FILES='1', FNV_QUIT_AFTER='1')
-    log = args.out/'startup.log'
+    log = args.out/f'{args.label}-startup.log'
     timed_out = False
     with log.open('wb') as stream:
         try:
@@ -36,8 +37,13 @@ def main():
     receipt = dict(returncode=code, timed_out=timed_out, translation_traps=traps,
                    executable_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),
                    log_sha256=hashlib.sha256(log.read_bytes()).hexdigest(),
-                   game_data_supplied=False, title_or_gameplay_verified=False)
-    (args.out/'startup-result.json').write_text(json.dumps(receipt, indent=2))
+                   mode=args.label, game_data_supplied=False, title_or_gameplay_verified=False)
+    roots = exe.parent/'fallback_entries.txt'
+    if args.label == 'discovery' and roots.is_file():
+        entries = sorted({int(line, 0) for line in roots.read_text().splitlines() if line.strip()})
+        (args.out/'fallback_entries.txt').write_text(''.join(f'{entry:#x}\n' for entry in entries))
+        receipt['fallback_entries'] = [f'{entry:#x}' for entry in entries]
+    (args.out/f'{args.label}-startup-result.json').write_text(json.dumps(receipt, indent=2))
     print(json.dumps(receipt, indent=2))
     print(text[-10000:])
     if traps or timed_out or code != 0:
