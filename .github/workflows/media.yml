@@ -11,6 +11,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+      - run: bash tests/run.sh
       - run: python3 tests/audio_shims_test.py
       - run: gh run download 41685697032 --repo "$GITHUB_REPOSITORY" --name FNV-public-codecs-macos --dir build/codecs-macos
       - run: python3 tests/vorbis_bridge_test.py build/codecs-macos
