@@ -1,0 +1,19 @@
+name: Build pinned public audio codecs
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  codecs:
+    strategy:
+      matrix:
+        platform: [ios,macos]
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/build_codecs.py '${{ matrix.platform }}' --out build/codecs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FNV-public-codecs-${{ matrix.platform }}
+          path: build/codecs/prefix
+          retention-days: 1
