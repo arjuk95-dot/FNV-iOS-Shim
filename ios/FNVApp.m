@@ -2,6 +2,10 @@
 #import "FNVSurface.h"
 #import "FNVGameplayTouchView.h"
 #import "FNVPad.h"
+#include "FNVDisplay.h"
+#ifndef FNV_PROBE
+#include "FNVNativeMedia.h"
+#endif
 #import "input.h"
 #import <CommonCrypto/CommonDigest.h>
 #include <pthread.h>
@@ -64,43 +68,12 @@ static NSString *exeHash(NSURL *url) {
 }
 #endif
 
-#ifndef FNV_PROBE
-static void gameButton(UIButton *button, BOOL down) {
-    if (button.tag < 0) input_mouse_button((int)-button.tag - 1, down);
-    else input_key((int)button.tag, down);
-}
-#endif
 @interface App : UIResponder <UIApplicationDelegate>
 @property(nonatomic,strong) UIWindow *window;
 @property(nonatomic,strong) UILabel *status;
 @property(nonatomic,strong) FNVGameplayTouchView *touch;
 @end
 @implementation App
-#ifndef FNV_PROBE
-- (void)buttonDown:(UIButton *)b { gameButton(b,YES); }
-- (void)buttonUp:(UIButton *)b { gameButton(b,NO); }
-- (void)addActions:(UIView *)view {
-    UIStackView *row = [UIStackView new]; row.spacing = 4;
-    row.translatesAutoresizingMaskIntoConstraints = NO;
-    NSArray *names = @[@"↑",@"↓",@"Enter",@"Back",@"Use",@"Pip",@"Fire",@"Aim"];
-    const int codes[] = {0xc8,0xd0,0x1c,0x01,0x12,0x0f,-1,-2};
-    for (NSUInteger i=0; i<names.count; i++) {
-        UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-        b.tag = codes[i];
-        [b setTitle:names[i] forState:UIControlStateNormal];
-        b.tintColor = UIColor.whiteColor;
-        b.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:0.45];
-        [b.widthAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
-        [b.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
-        [b addTarget:self action:@selector(buttonDown:) forControlEvents:UIControlEventTouchDown];
-        [b addTarget:self action:@selector(buttonUp:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
-        [row addArrangedSubview:b];
-    }
-    [view addSubview:row];
-    [NSLayoutConstraint activateConstraints:@[[row.centerXAnchor constraintEqualToAnchor:view.centerXAnchor],
-        [row.bottomAnchor constraintEqualToAnchor:view.safeAreaLayoutGuide.bottomAnchor]]];
-}
-#endif
 - (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     UIViewController *vc = [UIViewController new];
@@ -124,6 +97,7 @@ static void gameButton(UIButton *button, BOOL down) {
     NSURL *docs = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
     NSURL *log = [docs URLByAppendingPathComponent:@"fnv.log"];
     freopen(log.fileSystemRepresentation, "w", stderr); setvbuf(stderr, NULL, _IONBF, 0);
+    CGSize native=UIScreen.mainScreen.nativeBounds.size;fnv_display_configure((unsigned)native.width,(unsigned)native.height);
 #ifdef FNV_PROBE
     fnv_use_analog(1);
     self.status.text = @"Input / Metal probe · Swipe right half to change red and green. Hold left stick to change blue.";
@@ -144,9 +118,28 @@ static void gameButton(UIButton *button, BOOL down) {
     setenv("FNV_ROOT", root.fileSystemRepresentation, 1);
     setenv("FNV_TRACE_FILES", "1", 1);
     setenv("FNV_TRACE_SYNC", "1", 1);
-    // An empty file is an explicit opt-in to testing the game's controller path.
-    fnv_use_analog([NSFileManager.defaultManager fileExistsAtPath:[root URLByAppendingPathComponent:@"analog-input.flag"].path]);
-    [self addActions:view];
+    fnv_use_analog(1);
+    // Update only owned display/controller keys; preserve the synchronous NavMesh setting and all other INI content.
+    NSString *prefs=[root.path stringByAppendingPathComponent:@"UserDocuments/My Games/FalloutNV/FalloutPrefs.ini"];
+    for(NSString *leaf in [NSFileManager.defaultManager contentsOfDirectoryAtPath:prefs.stringByDeletingLastPathComponent error:NULL])
+        if([leaf caseInsensitiveCompare:@"FalloutPrefs.ini"]==NSOrderedSame){prefs=[prefs.stringByDeletingLastPathComponent stringByAppendingPathComponent:leaf];break;}
+    NSString *text=[NSString stringWithContentsOfFile:prefs encoding:NSISOLatin1StringEncoding error:NULL]?:@"";
+    if([NSFileManager.defaultManager fileExistsAtPath:prefs]&&![NSFileManager.defaultManager fileExistsAtPath:[prefs stringByAppendingString:@".before-native-display"]])
+        [NSFileManager.defaultManager copyItemAtPath:prefs toPath:[prefs stringByAppendingString:@".before-native-display"] error:NULL];
+    NSMutableArray<NSString*> *lines=[[text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] mutableCopy];
+    NSDictionary *settings=@{@"display":@{@"isize w":@[@"iSize W",@(fnv_display_width())],@"isize h":@[@"iSize H",@(fnv_display_height())],@"bfull screen":@[@"bFull Screen",@1]},@"controls":@{@"buse joystick":@[@"bUse Joystick",@1]}};
+    for(NSString *section in settings){NSDictionary *keys=settings[section];NSMutableSet *pending=[NSMutableSet setWithArray:keys.allKeys];BOOL inside=NO;NSInteger insert=-1;
+        for(NSUInteger i=0;i<lines.count;i++){NSString *line=[lines[i] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+            if([line hasPrefix:@"["]&&[line hasSuffix:@"]"]){if(inside&&insert<0)insert=i;inside=[[[line substringWithRange:NSMakeRange(1,line.length-2)] lowercaseString] isEqualToString:section];}
+            else if(inside){NSRange equal=[line rangeOfString:@"="];if(equal.location!=NSNotFound){NSString *key=[[[line substringToIndex:equal.location] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet] lowercaseString];NSArray *value=keys[key];if(value){lines[i]=[NSString stringWithFormat:@"%@=%@",value[0],value[1]];[pending removeObject:key];}}}
+        }
+        if(insert<0){insert=lines.count;if(!inside){[lines addObject:[NSString stringWithFormat:@"[%@]",section]];insert++;}}
+        for(NSString *key in pending){NSArray *value=keys[key];[lines insertObject:[NSString stringWithFormat:@"%@=%@",value[0],value[1]] atIndex:insert++];}
+    }
+    [NSFileManager.defaultManager createDirectoryAtPath:prefs.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL];
+    NSError *prefsError=nil;BOOL prefsOK=[[lines componentsJoinedByString:@"\n"] writeToFile:prefs atomically:YES encoding:NSISOLatin1StringEncoding error:&prefsError];
+    fprintf(stderr,"[display] preferred %ux%u native aspect; controller + relative swipe; preferences=%s\n",fnv_display_width(),fnv_display_height(),prefsOK?"written":prefsError.localizedDescription.UTF8String);
+    fnv_audio_start();
     self.status.text = nil;
 #endif
     NSThread *thread = [[NSThread alloc] initWithBlock:^{
@@ -178,12 +171,17 @@ static void gameButton(UIButton *button, BOOL down) {
 }
 - (void)applicationWillResignActive:(UIApplication *)app { [self.touch resetTouches];
 #ifndef FNV_PROBE
+    fnv_media_active(0);
     for (int i=0; i<2; ++i) input_mouse_button(i, 0);
     int keys[] = {0xc8,0xd0,0x1c,0x01,0x12,0x0f};
     for (unsigned i=0; i<sizeof keys/sizeof keys[0]; ++i) input_key(keys[i],0);
 #endif
     setActive(NO); }
-- (void)applicationDidBecomeActive:(UIApplication *)app { setActive(YES); }
+- (void)applicationDidBecomeActive:(UIApplication *)app {
+#ifndef FNV_PROBE
+    fnv_media_active(1);
+#endif
+    setActive(YES); }
 @end
 
 int main(int argc, char **argv) {

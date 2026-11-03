@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include "shims.h"
+#include "FNVDisplay.h"
 #include <time.h>
 
 #define FAKE_HWND 0x00010010u
@@ -59,10 +60,10 @@ SHIM(GetActiveWindow) { RET(c, FAKE_HWND, 0); }
 SHIM(GetForegroundWindow) { RET(c, FAKE_HWND, 0); }
 SHIM(GetFocus) { RET(c, FAKE_HWND, 0); }
 SHIM(SetForegroundWindow) { RET(c, 1, 1); }
-SHIM(GetClientRect) { uint32_t r = ARG(c, 1); P32(r, 0); P32(r + 4, 0); P32(r + 8, 1280); P32(r + 12, 720); RET(c, 1, 2); }
+SHIM(GetClientRect) { uint32_t r = ARG(c, 1); P32(r, 0); P32(r + 4, 0); P32(r + 8, fnv_client_width()); P32(r + 12, fnv_client_height()); RET(c, 1, 2); }
 SHIM(AdjustWindowRect) { RET(c, 1, 3); }
 SHIM(AdjustWindowRectEx) { RET(c, 1, 4); }
-SHIM(GetSystemMetrics) { uint32_t i = ARG(c, 0); RET(c, i == 0 ? 1920 : i == 1 ? 1080 : 0, 1); }
+SHIM(GetSystemMetrics) { uint32_t i = ARG(c, 0); RET(c, i == 0 ? fnv_display_width() : i == 1 ? fnv_display_height() : 0, 1); }
 SHIM(EnumDisplayDevicesA) { RET(c, 0, 4); }
 SHIM(LoadIconA) { RET(c, 0x00020001, 2); }
 SHIM(LoadCursorA) { RET(c, 0x00020002, 2); }

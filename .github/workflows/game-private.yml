@@ -23,6 +23,16 @@ on:
         required: false
         default: '[]'
         type: string
+      hybrid_input:
+        description: Verified camera-only input compatibility call sites
+        required: false
+        default: '[]'
+        type: string
+      codecs_run_id:
+        description: Pinned public native codecs artifact run
+        required: false
+        default: '41685697032'
+        type: string
 permissions:
   contents: read
   actions: read
@@ -37,6 +47,8 @@ jobs:
       EXE_SHA256: ${{ inputs.executable_sha256 }}
       CACHE_RUN_ID: ${{ inputs.cache_run_id }}
       STATE_PROBES: ${{ inputs.state_probes }}
+      HYBRID_INPUT: ${{ inputs.hybrid_input }}
+      CODECS_RUN_ID: ${{ inputs.codecs_run_id }}
     steps:
       - uses: actions/checkout@v4
       - name: Require private repository
@@ -49,11 +61,13 @@ jobs:
           python3 tools/game_inputs.py unpack "$RUNNER_TEMP/fnv-download/fnv-game-inputs.zip" "$RUNNER_TEMP/fnv-private" --archive-sha256 "$INPUT_SHA256" --exe-sha256 "$EXE_SHA256"
       - name: Compile and link translated game
         run: |
+          case "$CODECS_RUN_ID" in ''|*[!0-9]*) exit 1;; esac
+          gh run download "$CODECS_RUN_ID" --repo "$GITHUB_REPOSITORY" --name FNV-public-codecs-ios --dir build/codecs-ios
           if [ -n "$CACHE_RUN_ID" ]; then
             case "$CACHE_RUN_ID" in *[!0-9]*) exit 1;; esac
             gh run download "$CACHE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name FNV-ios-objects-private --dir build/ios-objects
           fi
-          python3 tools/build.py game --generated "$RUNNER_TEMP/fnv-private/generated" --exe "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --jobs 2 --cache build/ios-objects --state-probes "$STATE_PROBES"
+          python3 tools/build.py game --generated "$RUNNER_TEMP/fnv-private/generated" --exe "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --jobs 2 --cache build/ios-objects --state-probes "$STATE_PROBES" --codec-prefix build/codecs-ios --hybrid-input "$HYBRID_INPUT"
       - name: Verify game IPA
         run: python3 tools/verify_ipa.py build/FNVGame.ipa --target game --receipt build/game-validation.json
       - uses: actions/upload-artifact@v4

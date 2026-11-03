@@ -33,7 +33,8 @@ def main():
         parser.error('Provide a complete --generated directory or use --host-check')
     sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
     cc = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--find', 'clang'], text=True).strip()
-    sources = [ROOT/'tools/startup/main.c', ROOT/'ios/FNVPad.c', R/'rt_dispatch.c', H/'dshow.m']
+    sources = [ROOT/'tools/startup/main.c', ROOT/'ios/FNVPad.c',ROOT/'ios/FNVDisplay.c',
+               ROOT/'ios/FNVAudioMixer.c',ROOT/'ios/FNVNativeMedia.m',ROOT/'ios/FNVNativeVideo.m', R/'rt_dispatch.c', H/'dshow.m']
     sources += sorted(H.glob('*.c'))  # includes the null renderer; no UIKit or Metal window
     if not args.host_check:
         sources += [args.generated/'table.c', args.generated/'stubs.c', *sorted(args.generated.glob('tu_*.c'))]

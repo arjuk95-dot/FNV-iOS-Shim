@@ -12,6 +12,8 @@ import subprocess
 import tempfile
 import zipfile
 from state_probes import normalize,instrument
+from native_codecs import validate as validate_codecs
+import hybrid_input
 
 ROOT = Path(__file__).resolve().parents[1]
 R = ROOT / 'upstream/recomp'
@@ -35,11 +37,17 @@ def main():
     p.add_argument('--jobs', type=int, default=min(os.cpu_count() or 2, 6))
     p.add_argument('--cache',type=Path,help='private verified object cache; compiler, SDK, flags, headers and content keyed')
     p.add_argument('--state-probes',default='[]',help='bounded numeric entry/receiver-field diagnostic specification')
+    p.add_argument('--codec-prefix',type=Path,help='verified pinned iOS Ogg/Vorbis static libraries')
+    p.add_argument('--hybrid-input',default='[]',help='verified camera-only call-site profile')
     args = p.parse_args()
     probes=normalize(args.state_probes)
+    hybrid=hybrid_input.normalize(args.hybrid_input,args.exe)
+    matched_hybrid=set()
     matched_probes=set()
     probe = args.target == 'probe'
     host_check = args.target == 'host-check'
+    codec=validate_codecs(args.codec_prefix,'ios') if args.codec_prefix else None
+    if args.target=='game' and not codec:p.error('game requires --codec-prefix for native sound decoding')
     if args.target == 'game' and not (args.exe and args.exe.is_file() and args.generated and (args.generated/'table.c').is_file()
                           and (args.generated/'stubs.c').is_file() and any(args.generated.glob('tu_*.c'))):
         p.error('game requires --exe and --generated with full translated C sources')
@@ -54,11 +62,12 @@ def main():
         args.cache.mkdir(parents=True,exist_ok=True)
         if (args.cache/'manifest.json').exists():old_manifest=json.loads((args.cache/'manifest.json').read_text())
     name = 'FNVShimProbe' if probe else 'FNVGame'
-    sources = [I/'FNVApp.m',I/'FNVGameplayTouchView.m',I/'FNVPad.c',H/'d3d9_metal.m']
+    sources = [I/'FNVApp.m',I/'FNVGameplayTouchView.m',I/'FNVPad.c',I/'FNVDisplay.c',H/'d3d9_metal.m']
     if probe:
         sources += [I/'FNVProbe.c', I/'ProbeRuntime.c']
         sources += [H/(s+'.c') for s in ['d3d9','dinput','com','gheap','input','sm2msl']]
     else:
+        sources += [I/'FNVAudioMixer.c',I/'FNVNativeMedia.m',I/'FNVNativeVideo.m']
         sources += [f for f in H.glob('*.c') if f.name != 'd3d9_null.c']
         sources += [H/'dshow.m',R/'rt_dispatch.c']
         if not host_check:
@@ -77,10 +86,13 @@ def main():
             if probes and args.generated and source.parent.resolve()==args.generated.resolve():
                 content,matched=instrument(content,probes)
                 matched_probes.update(matched)
+            if hybrid and args.generated and source.parent.resolve()==args.generated.resolve():
+                content,found=hybrid_input.instrument(content,hybrid);matched.update(found);matched_hybrid.update(found)
             compiled_source=source
             if matched:
                 compiled_source=tmp/('probe-'+source.name);compiled_source.write_bytes(content)
             flags=['-O1','-I',str(H),'-I',str(R),'-I',str(I)]
+            if codec:flags+=['-DFNV_HAVE_VORBIS','-I',str(codec/'include')]
             if source.suffix=='.m': flags.append('-fobjc-arc')
             if probe: flags.append('-DFNV_PROBE')
             elif not host_check: flags.append('-DRT_CALLTRACE')
@@ -94,6 +106,7 @@ def main():
             compiled=list(pool.map(compile_one, enumerate(sources)))
         objects=[path for path,_ in compiled]
         if probes and set(probes)!=matched_probes:raise ValueError('Requested diagnostic entries absent from generated source')
+        if set(hybrid)!=matched_hybrid:raise ValueError('Requested hybrid camera sites absent from generated source')
         print(f'iOS objects: {sum(reused for _,reused in compiled)} reused, {sum(not reused for _,reused in compiled)} compiled',flush=True)
         if args.cache:
             (args.cache/'manifest.json').write_text(json.dumps({Path(path).name:digest(Path(path)) for path in objects},indent=2))
@@ -101,7 +114,9 @@ def main():
             print(f'PASS: compiled {len(objects)} public game-host sources for arm64 iPhoneOS; no game inputs or IPA')
             return
         frameworks=['Foundation','UIKit','Metal','QuartzCore','CoreGraphics','AVFoundation','CoreVideo','CoreMedia','ImageIO','UniformTypeIdentifiers']
-        run(base+objects+[v for f in frameworks for v in ('-framework',f)]+['-o',str(app/name)])
+        libraries=[str(codec/'lib'/('lib'+n+'.a')) for n in ['vorbisfile','vorbis','ogg']] if codec else []
+        run(base+objects+libraries+[v for f in frameworks for v in ('-framework',f)]+['-o',str(app/name)])
+        if codec:shutil.copytree(codec/'licenses',app/'Licenses')
         info=dict(CFBundleDevelopmentRegion='en',CFBundleExecutable=name,CFBundleName=name,CFBundleDisplayName=name,
                   CFBundleIdentifier='dev.fnvshim.'+args.target,CFBundlePackageType='APPL',CFBundleVersion=os.environ.get('GITHUB_RUN_NUMBER','1'),
                   CFBundleShortVersionString='0.1',CFBundleInfoDictionaryVersion='6.0',MinimumOSVersion='18.0',
@@ -109,6 +124,7 @@ def main():
                   UIFileSharingEnabled=True,LSSupportsOpeningDocumentsInPlace=True,UILaunchScreen={},
                   UISupportedInterfaceOrientations=['UIInterfaceOrientationLandscapeLeft','UIInterfaceOrientationLandscapeRight'])
         if not probe: info['FNVExecutableSHA256']=digest(args.exe)
+        info['FNVHybridCameraSites']=[hex(site) for site in sorted(hybrid)]
         try:
             info['FNVBuildSourceCommit']=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True,stderr=subprocess.DEVNULL).strip()
         except (OSError, subprocess.CalledProcessError):
@@ -116,7 +132,8 @@ def main():
         (app/'Info.plist').write_bytes(plistlib.dumps(info))
         ipa=args.out/(name+'.ipa')
         with zipfile.ZipFile(tmp/ipa.name,'w',zipfile.ZIP_DEFLATED) as z:
-            for f in app.iterdir(): z.write(f,f.relative_to(tmp))
+            for f in app.rglob('*'):
+                if f.is_file():z.write(f,f.relative_to(tmp))
         os.replace(tmp/ipa.name,ipa)
         print(ipa.resolve())
 if __name__=='__main__': main()

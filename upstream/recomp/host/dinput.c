@@ -117,14 +117,11 @@ const ShimTable dinput_shims = { (const Shim[]){ {"DirectInput8Create", DirectIn
 #include "FNVPad.h"
 static void XInputGetState_(CPU *c) {
     if (ARG(c, 0) || !fnv_analog_enabled()) { RET(c, 1167, 2); return; }
-    uint32_t out = ARG(c, 1), packet;
+    uint32_t out = ARG(c, 1);
     if (!out) { RET(c, 87, 2); return; }
-    int16_t x, y;
-    fnv_pad_state(&x, &y, &packet);
-    memset(MEM + out, 0, 16);
-    P32(out, packet);
-    memcpy(MEM + out + 8, &x, 2);
-    memcpy(MEM + out + 10, &y, 2);
+    FNVPadState state;fnv_pad_snapshot(&state);
+    _Static_assert(sizeof(FNVPadState)==16,"XINPUT_STATE ABI");
+    memcpy(MEM + out,&state,16);
     RET(c, 0, 2);
 }
 static void XInputSetState_(CPU *c) { RET(c, ARG(c, 0) || !fnv_analog_enabled() ? 1167 : 0, 2); }
@@ -134,8 +131,16 @@ static void XInputGetCapabilities_(CPU *c) {
     if (!out) { RET(c, 87, 3); return; }
     memset(MEM + out, 0, 20);
     MEM[out] = 1; MEM[out + 1] = 1;
-    P32(out + 8, 0x7fff7fff); // supported LX and LY axes of the virtual pad
+    MEM[out+4]=0xff;MEM[out+5]=0xf3; // buttons: D-pad, menu, clicks, shoulders and ABXY
+    MEM[out+6]=MEM[out+7]=255; // analog triggers
+    P32(out + 8, 0x7fff7fff);P32(out+12,0x7fff7fff);
     RET(c, 0, 3);
 }
 const ShimTable xinput_shims = { (const Shim[]){ {"xinput1_3#2", XInputGetState_}, {"xinput1_3#3", XInputSetState_},
     {"xinput1_3#4", XInputGetCapabilities_}, {"XInputGetState", XInputGetState_}, {"XInputSetState", XInputSetState_}, {"XInputGetCapabilities", XInputGetCapabilities_} }, 6 };
+
+// Used only at build-verified camera selection/scaling sites. Other controller mode queries run unchanged.
+void fnv_input_mouse_camera(CPU *c,uint32_t site){
+    if(fnv_analog_enabled())SETREG(c,R_EAX,REG(c,R_EAX)&~255u);
+    (void)site;
+}

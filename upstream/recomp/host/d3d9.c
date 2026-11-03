@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "com.h"
+#include "FNVDisplay.h"
 #include "d3d9_backend.h"
 #include "gen/d3d9_methods.h"
 
@@ -457,6 +458,7 @@ static void Dev_Reset(CPU *c) {
     uint32_t pp = ARG(c, 1);
     memcpy(g_d3d.pp, MEM + pp, 56);
     if (G32(pp)) g_d3d.width = G32(pp); if (G32(pp + 4)) g_d3d.height = G32(pp + 4);
+    fnv_display_client(g_d3d.width,g_d3d.height);
     fprintf(stderr, "[d3d9] Reset %ux%u\n", g_d3d.width, g_d3d.height);
     d3d_backend_resize(&g_d3d);
     RET(c, 0, 2);
@@ -684,14 +686,14 @@ static void D3D_GetAdapterIdentifier(CPU *c) {
     P32(p + 1096, 1);                                         // WHQLLevel
     RET(c, 0, 4);
 }
-static void D3D_GetAdapterModeCount(CPU *c) { RET(c, (uint32_t)NMODES, 3); }
+static void D3D_GetAdapterModeCount(CPU *c) { RET(c, (uint32_t)NMODES+1, 3); }
 static void D3D_EnumAdapterModes(CPU *c) {
     uint32_t i = ARG(c, 3), m = ARG(c, 4);
-    if (i >= NMODES) { RET(c, D3DERR_INVALIDCALL, 5); return; }
-    P32(m, modes[i].w); P32(m + 4, modes[i].h); P32(m + 8, 60); P32(m + 12, ARG(c, 2) ? ARG(c, 2) : 22);
+    if (i > NMODES) { RET(c, D3DERR_INVALIDCALL, 5); return; }
+    P32(m, i==0?fnv_display_width():modes[i-1].w); P32(m + 4, i==0?fnv_display_height():modes[i-1].h); P32(m + 8, 60); P32(m + 12, ARG(c, 2) ? ARG(c, 2) : 22);
     RET(c, 0, 5);
 }
-static void D3D_GetAdapterDisplayMode(CPU *c) { uint32_t m = ARG(c, 2); P32(m, 1920); P32(m + 4, 1080); P32(m + 8, 60); P32(m + 12, 22); RET(c, 0, 3); }
+static void D3D_GetAdapterDisplayMode(CPU *c) { uint32_t m = ARG(c, 2); P32(m, fnv_display_width()); P32(m + 4, fnv_display_height()); P32(m + 8, 60); P32(m + 12, 22); RET(c, 0, 3); }
 static void D3D_CheckDeviceMultiSampleType(CPU *c) { if (ARG(c, 6)) P32(ARG(c, 6), 1); RET(c, ARG(c, 5) <= 8 ? 0 : D3DERR_NOTAVAILABLE, 7); }
 static void D3D_GetAdapterMonitor(CPU *c) { RET(c, 0x00070001, 2); }
 
@@ -744,7 +746,8 @@ static void D3D_CreateDevice(CPU *c) {
     make_vtables();
     uint32_t pp = ARG(c, 5);
     memcpy(g_d3d.pp, MEM + pp, 56);
-    g_d3d.width = G32(pp) ? G32(pp) : 1280; g_d3d.height = G32(pp + 4) ? G32(pp + 4) : 720;
+    g_d3d.width = G32(pp) ? G32(pp) : fnv_display_width(); g_d3d.height = G32(pp + 4) ? G32(pp + 4) : fnv_display_height();
+    fnv_display_client(g_d3d.width,g_d3d.height);
     g_d3d.hwnd = ARG(c, 3); g_d3d.d3d = COM_THIS(c);
     uint32_t dev = newobj(vt_dev, 0, 0, 0);
     P32(dev + 12, dev);
