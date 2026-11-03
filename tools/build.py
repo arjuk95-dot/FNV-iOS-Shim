@@ -63,6 +63,7 @@ def main():
             flags=['-O1','-I',str(H),'-I',str(R),'-I',str(I)]
             if source.suffix=='.m': flags.append('-fobjc-arc')
             if probe: flags.append('-DFNV_PROBE')
+            elif not host_check: flags.append('-DRT_CALLTRACE')
             run(base + flags + ['-c',str(source),'-o',str(out)])
             return str(out)
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
