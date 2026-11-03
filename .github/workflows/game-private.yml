@@ -1,0 +1,48 @@
+name: Build approved private game inputs
+on:
+  workflow_dispatch:
+    inputs:
+      input_tag:
+        description: Private temporary release tag approved by the owner
+        required: true
+        type: string
+      input_sha256:
+        description: SHA-256 of fnv-game-inputs.zip
+        required: true
+        type: string
+      executable_sha256:
+        description: SHA-256 of the exact locally analyzed executable
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  game:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INPUT_TAG: ${{ inputs.input_tag }}
+      INPUT_SHA256: ${{ inputs.input_sha256 }}
+      EXE_SHA256: ${{ inputs.executable_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require private repository
+        run: test '${{ github.event.repository.private }}' = true
+      - name: Download and validate approved inputs
+        run: |
+          set -eu
+          mkdir "$RUNNER_TEMP/fnv-download"
+          gh release download "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" --pattern fnv-game-inputs.zip --dir "$RUNNER_TEMP/fnv-download"
+          python3 tools/game_inputs.py unpack "$RUNNER_TEMP/fnv-download/fnv-game-inputs.zip" "$RUNNER_TEMP/fnv-private" --archive-sha256 "$INPUT_SHA256" --exe-sha256 "$EXE_SHA256"
+      - name: Compile and link translated game
+        run: python3 tools/build.py game --generated "$RUNNER_TEMP/fnv-private/generated" --exe "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --jobs 2
+      - name: Verify game IPA
+        run: python3 tools/verify_ipa.py build/FNVGame.ipa --target game --receipt build/game-validation.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FNVGame-private-arm64
+          path: |
+            build/FNVGame.ipa
+            build/game-validation.json
+          retention-days: 1
