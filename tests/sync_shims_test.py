@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory(prefix='fnv-sync-test-') as temp:
     outputs={}
     for name,module in [('historical',baseline),('repaired',ROOT/'upstream/recomp/host/shims_sync.c')]:
         binary=temp/name
-        subprocess.run(['xcrun','clang','-O1','-DRT_CALLTRACE','-I',str(ROOT/'upstream/recomp/host'),'-I',str(ROOT/'upstream/recomp'),
+        subprocess.run(['xcrun','clang','-O1','-DRT_CALLTRACE',*(['-DFNV_TEST_DIAGNOSTICS'] if name=='repaired' else []),'-I',str(ROOT/'upstream/recomp/host'),'-I',str(ROOT/'upstream/recomp'),
                         str(ROOT/'tests/sync_shims_test.c'),str(module),'-o',str(binary)],check=True)
         result=subprocess.run([str(binary)],capture_output=True,text=True,timeout=10)
         print(name+'\n'+result.stdout+result.stderr,flush=True)
