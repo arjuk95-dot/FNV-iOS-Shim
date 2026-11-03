@@ -9,4 +9,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 tests/file_shims_case_test.py
-      - run: python3 tools/build.py host-check
+      - run: python3 tools/build.py host-check --cache build/host-objects
+      - run: python3 tools/build.py host-check --cache build/host-objects

@@ -3,6 +3,7 @@
 import argparse
 import concurrent.futures
 import hashlib
+import json
 import os
 from pathlib import Path
 import plistlib
@@ -31,6 +32,7 @@ def main():
     p.add_argument('--exe', type=Path, help='exact executable used to generate these units')
     p.add_argument('--out', type=Path, default=Path('build'))
     p.add_argument('--jobs', type=int, default=min(os.cpu_count() or 2, 6))
+    p.add_argument('--cache',type=Path,help='private verified object cache; compiler, SDK, flags, headers and content keyed')
     args = p.parse_args()
     probe = args.target == 'probe'
     host_check = args.target == 'host-check'
@@ -40,6 +42,13 @@ def main():
     if not shutil.which('xcrun'): p.exit(1,'Apple build required: install Xcode and select it with xcode-select.\n')
     sdk = subprocess.check_output(['xcrun','--sdk','iphoneos','--show-sdk-path'],text=True).strip()
     cc = subprocess.check_output(['xcrun','--sdk','iphoneos','--find','clang'],text=True).strip()
+    signature=hashlib.sha256(subprocess.check_output([cc,'--version'])+sdk.encode())
+    for header in sorted({p for directory in [R,I] for p in directory.rglob('*.h')}):
+        signature.update(str(header.relative_to(ROOT)).encode()+header.read_bytes())
+    config=signature.digest();old_manifest={}
+    if args.cache:
+        args.cache.mkdir(parents=True,exist_ok=True)
+        if (args.cache/'manifest.json').exists():old_manifest=json.loads((args.cache/'manifest.json').read_text())
     name = 'FNVShimProbe' if probe else 'FNVGame'
     sources = [I/'FNVApp.m',I/'FNVGameplayTouchView.m',I/'FNVPad.c',H/'d3d9_metal.m']
     if probe:
@@ -64,10 +73,18 @@ def main():
             if source.suffix=='.m': flags.append('-fobjc-arc')
             if probe: flags.append('-DFNV_PROBE')
             elif not host_check: flags.append('-DRT_CALLTRACE')
+            key=hashlib.sha256(config+json.dumps(base+flags).encode()+source.name.encode()+source.read_bytes()).hexdigest()
+            stored=args.cache/(key+'.o') if args.cache else None
+            if stored and stored.exists() and digest(stored)==old_manifest.get(stored.name):return str(stored),True
             run(base + flags + ['-c',str(source),'-o',str(out)])
-            return str(out)
+            if stored:os.replace(out,stored);out=stored
+            return str(out),False
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            objects=list(pool.map(compile_one, enumerate(sources)))
+            compiled=list(pool.map(compile_one, enumerate(sources)))
+        objects=[path for path,_ in compiled]
+        print(f'iOS objects: {sum(reused for _,reused in compiled)} reused, {sum(not reused for _,reused in compiled)} compiled',flush=True)
+        if args.cache:
+            (args.cache/'manifest.json').write_text(json.dumps({Path(path).name:digest(Path(path)) for path in objects},indent=2))
         if host_check:
             print(f'PASS: compiled {len(objects)} public game-host sources for arm64 iPhoneOS; no game inputs or IPA')
             return

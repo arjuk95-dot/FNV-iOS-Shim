@@ -14,8 +14,13 @@ on:
         description: SHA-256 of the exact locally analyzed executable
         required: true
         type: string
+      cache_run_id:
+        description: Optional prior private iOS object artifact run
+        required: false
+        type: string
 permissions:
   contents: read
+  actions: read
 jobs:
   game:
     runs-on: macos-15
@@ -25,6 +30,7 @@ jobs:
       INPUT_TAG: ${{ inputs.input_tag }}
       INPUT_SHA256: ${{ inputs.input_sha256 }}
       EXE_SHA256: ${{ inputs.executable_sha256 }}
+      CACHE_RUN_ID: ${{ inputs.cache_run_id }}
     steps:
       - uses: actions/checkout@v4
       - name: Require private repository
@@ -36,7 +42,12 @@ jobs:
           gh release download "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" --pattern fnv-game-inputs.zip --dir "$RUNNER_TEMP/fnv-download"
           python3 tools/game_inputs.py unpack "$RUNNER_TEMP/fnv-download/fnv-game-inputs.zip" "$RUNNER_TEMP/fnv-private" --archive-sha256 "$INPUT_SHA256" --exe-sha256 "$EXE_SHA256"
       - name: Compile and link translated game
-        run: python3 tools/build.py game --generated "$RUNNER_TEMP/fnv-private/generated" --exe "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --jobs 2
+        run: |
+          if [ -n "$CACHE_RUN_ID" ]; then
+            case "$CACHE_RUN_ID" in *[!0-9]*) exit 1;; esac
+            gh run download "$CACHE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name FNV-ios-objects-private --dir build/ios-objects
+          fi
+          python3 tools/build.py game --generated "$RUNNER_TEMP/fnv-private/generated" --exe "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --jobs 2 --cache build/ios-objects
       - name: Verify game IPA
         run: python3 tools/verify_ipa.py build/FNVGame.ipa --target game --receipt build/game-validation.json
       - uses: actions/upload-artifact@v4
@@ -45,4 +56,10 @@ jobs:
           path: |
             build/FNVGame.ipa
             build/game-validation.json
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: FNV-ios-objects-private
+          path: build/ios-objects
           retention-days: 1
