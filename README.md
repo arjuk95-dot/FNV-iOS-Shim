@@ -40,6 +40,15 @@ The game loop runs on a worker thread. UIKit owns the main thread and the CAMeta
 
 ## Repeat the host checks
 
+For a runtime stop immediately after a returning guest helper, check the matching
+Ghidra database for an incorrect no-return annotation and undecoded continuation.
+`tools/ghidra/RepairCallContinuations.java` audits or repairs direct-call
+continuations for explicitly supplied callee addresses. It requires an actual
+RET in each selected callee's body, stays within the chosen code block, and
+preserves existing instructions and defined data. Run `audit .text <callee>`
+first, then `apply .text <callee>` on the private project before exporting again.
+Keep executable-specific addresses and exported code outside this repository.
+
     bash tests/run.sh
 
 The suite checks touch math against upstream input.c and runs a synthetic guest call sequence using the real COM table builder, gamepad state, guest heap, device creation, clear and present. It asserts the merged swipe and analog values at the renderer boundary for three frames using a headless backend. The iPhone probe uses the real Metal backend for the same call sequence.
