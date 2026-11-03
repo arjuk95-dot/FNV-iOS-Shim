@@ -145,7 +145,11 @@ void input_script_tick(uint64_t frame) {
     static double quit_after = -1; static struct timespec t0;
     if (quit_after < 0) { const char *q = getenv("FNV_QUIT_AFTER"); quit_after = q ? atof(q) : 0; clock_gettime(CLOCK_MONOTONIC, &t0); }
     {   // heap accounting every 30 s of wall time
+#ifdef __APPLE__
+        extern void gheap_report(void) __attribute__((weak_import));
+#else
         extern void gheap_report(void) __attribute__((weak));
+#endif
         static struct timespec last;
         struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
         if (t.tv_sec - last.tv_sec >= 30) { last = t; if (gheap_report) gheap_report(); }
