@@ -8,6 +8,7 @@
 // analysis pass can make it native.
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include <unicorn/unicorn.h>
 #include "host.h"
 
@@ -17,6 +18,58 @@ static _Thread_local uc_engine *engines[MAXDEPTH];
 static _Thread_local int depth;
 static _Thread_local CPU *cur_cpu[MAXDEPTH];
 static _Thread_local uint32_t cur_root[MAXDEPTH];
+static _Thread_local uint32_t previous_pc[MAXDEPTH];
+static pthread_mutex_t evidence_lock=PTHREAD_MUTEX_INITIALIZER;
+static unsigned trace_count;
+
+static void trace_instruction(uc_engine *uc,uint64_t address,uint32_t size,void *unused) {
+    (void)unused;
+    if(!getenv("FNV_FALLBACK_TRACE") || !depth) return;
+    int d=depth-1;
+    uint32_t eax,ecx,edx,esp,ebp,flags;
+    uc_reg_read(uc,UC_X86_REG_EAX,&eax);uc_reg_read(uc,UC_X86_REG_ECX,&ecx);
+    uc_reg_read(uc,UC_X86_REG_EDX,&edx);uc_reg_read(uc,UC_X86_REG_ESP,&esp);
+    uc_reg_read(uc,UC_X86_REG_EBP,&ebp);uc_reg_read(uc,UC_X86_REG_EFLAGS,&flags);
+    pthread_mutex_lock(&evidence_lock);
+    if(trace_count++<50000) {
+        FILE *f=fopen("fallback-instructions.jsonl","a");
+        if(f) {
+            fprintf(f,"{\"root\":%u,\"pc\":%u,\"from_pc\":%u,\"size\":%u,\"eax\":%u,\"ecx\":%u,\"edx\":%u,\"esp\":%u,\"ebp\":%u,\"eflags\":%u,\"bytes\":\"",
+                cur_root[d],(uint32_t)address,previous_pc[d],size,eax,ecx,edx,esp,ebp,flags);
+            for(uint32_t i=0;i<size && i<15;i++) fprintf(f,"%02x",MEM[(uint32_t)address+i]);
+            fprintf(f,"\"}\n");fclose(f);
+        }
+    }
+    pthread_mutex_unlock(&evidence_lock);
+    previous_pc[d]=(uint32_t)address;
+}
+
+static void snapshot_root(CPU *c,uint32_t a) {
+    uint32_t sp=REG(c,R_ESP),bp=REG(c,20),teb=REG(c,272),source=0;
+#ifdef RT_CALLTRACE
+    extern _Thread_local uint32_t rt_ct_ring[256],rt_ct_pos;
+    if(rt_ct_pos) source=rt_ct_ring[(rt_ct_pos-1)&255];
+#endif
+    uint32_t frame=bp>=0x800 ? (bp-0x800)&~0xfffu : 0;
+    uint32_t stack=sp&~0xfffu;
+    char name[100];
+    snprintf(name,sizeof name,"fallback-%08x-state.json",a);
+    FILE *f=fopen(name,"w");
+    if(f) {
+        fprintf(f,"{\"root\":%u,\"source_entry\":%u,\"return_pc\":%u,\"saved_eip_approx\":%u,\"stack_base\":%u,\"frame_base\":%u,\"teb_base\":%u,\"region_size\":8192,\"gpr\":[",
+            a,source,sp<=0xfffffffbu?G32(sp):0,REG(c,644),stack,frame,teb);
+        for(int i=0;i<8;i++) fprintf(f,"%s%u",i?",":"",REG(c,4*i));
+        fprintf(f,"]}\n");fclose(f);
+    }
+    snprintf(name,sizeof name,"fallback-%08x-cpu.bin",a);
+    f=fopen(name,"wb");if(f){fwrite(c->r,1,sizeof c->r,f);fclose(f);}
+    uint32_t bases[]={stack,frame,teb};const char *kinds[]={"stack","frame","teb"};
+    for(int i=0;i<3;i++) if(bases[i]<=0xffffdfffu) {
+        snprintf(name,sizeof name,"fallback-%08x-%s.bin",a,kinds[i]);
+        f=fopen(name,"wb");if(f){fwrite(MEM+bases[i],1,8192,f);fclose(f);}
+    }
+    fprintf(stderr,"[fallback-root] target=%#x source_entry=%#x return_pc=%#x saved_eip_approx=%#x\n",a,source,sp<=0xfffffffbu?G32(sp):0,REG(c,644));
+}
 
 // Ghidra register-file offsets
 #define O_EFL_CF 512
@@ -76,7 +129,7 @@ static void on_block(uc_engine *uc, uint64_t address, uint32_t size, void *user)
     uint32_t ret = G32(esp);
     // Hand off to native code only when this block was entered by a CALL: then [ESP] is the
     // address right after the calling block. A jump or fall-through into a native entry keeps
-    // interpreting (always correct, just slower) — treating it as a call would "return" to
+    // interpreting (always correct, just slower) â€” treating it as a call would "return" to
     // whatever value happens to sit on top of the stack.
     if (!is_import && ret != came_from) return;
     uc_to_cpu(uc, c);
@@ -105,24 +158,29 @@ static uc_engine *engine(CPU *c) {
     sel = 2 << 3; uc_reg_write(uc, UC_X86_REG_SS, &sel); uc_reg_write(uc, UC_X86_REG_DS, &sel); uc_reg_write(uc, UC_X86_REG_ES, &sel);
     sel = 3 << 3; uc_reg_write(uc, UC_X86_REG_FS, &sel);
     uc_hook h; uc_hook_add(uc, &h, UC_HOOK_BLOCK, (void *)on_block, NULL, 1, 0);
+    if(getenv("FNV_FALLBACK_TRACE")) {
+        uc_hook instruction_hook;
+        uc_hook_add(uc,&instruction_hook,UC_HOOK_CODE,(void *)trace_instruction,NULL,1,0);
+    }
     engines[depth] = uc;
     return uc;
 }
 
-static void log_root(uint32_t a) {
+static int log_root(uint32_t a) {
     static uint32_t seen[65536]; static int n;
-    for (int i = 0; i < n; i++) if (seen[i] == a) return;
+    for (int i = 0; i < n; i++) if (seen[i] == a) return 0;
     if (n < 65536) seen[n++] = a;
     FILE *f = fopen("fallback_entries.txt", "a");
     if (f) { fprintf(f, "%#x\n", a); fclose(f); }
     if (getenv("FNV_TRACE")) fprintf(stderr, "[fallback] interpreting %#x\n", a);
+    return 1;
 }
 
 void rt_fallback(CPU *c, uint32_t a) {
     if (a < 0x401000 || a >= 0x1000000 || depth >= MAXDEPTH) rt_trap(c, TRAP_NOFN, a);   // only .text
-    log_root(a);
+    if(log_root(a)) snapshot_root(c,a);
     uc_engine *uc = engine(c);
-    cur_cpu[depth] = c; cur_root[depth] = a; prev_end[depth] = 0;
+    cur_cpu[depth] = c; cur_root[depth] = a; prev_end[depth] = 0;previous_pc[depth]=0;
     depth++;
     uint32_t ret = G32(REG(c, R_ESP));      // the CALL already pushed it
     cpu_to_uc(c, uc);

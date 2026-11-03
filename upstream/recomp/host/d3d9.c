@@ -65,7 +65,7 @@ static void Unk_AddRef(CPU *c) { addref(COM_THIS(c)); RET(c, G32(COM_THIS(c) + 4
 // Released resources are freed (guest memory back to the heap) a few frames later, and only once
 // nothing in the device state still points at them: D3D9's Set* calls hold a reference that this
 // layer doesn't count, and draws already encoded may still read the guest object. Shaders and
-// declarations are never freed — the pipeline cache is keyed by their addresses.
+// declarations are never freed â€” the pipeline cache is keyed by their addresses.
 static void bury(uint32_t o);
 static void Unk_Release(CPU *c) {
     uint32_t o = COM_THIS(c), r = G32(o + 4);
@@ -746,8 +746,11 @@ static void D3D_CreateDevice(CPU *c) {
     for (int s = 0; s < 16; s++) g_d3d.stream_freq[s] = 1;
     fprintf(stderr, "[d3d9] CreateDevice %ux%u fmt %u windowed=%u msaa=%u -> %#x\n", g_d3d.width, g_d3d.height, G32(pp + 8), G32(pp + 32), G32(pp + 16), dev);
     d3d_backend_init(&g_d3d);
-    P32(ARG(c, 6), dev);
+    uint32_t output=ARG(c,6), guest_return=G32(REG(c,R_ESP));
+    P32(output, dev);
     RET(c, 0, 7);
+    fprintf(stderr,"[d3d9-return] CreateDevice hresult=%#x output=%#x device=%#x vtable=%#x first_method=%#x guest_return=%#x esp_after=%#x\n",
+        REG(c,R_EAX),output,G32(output),G32(dev),G32(G32(dev)),guest_return,REG(c,R_ESP));
 }
 
 static const Ov d3d_ov[] = {

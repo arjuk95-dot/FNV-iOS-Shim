@@ -3,7 +3,7 @@
 //
 //   fnvhost <game.exe> [args...]
 //
-// An import with no shim stops the run and names itself — that list is the M2 work queue.
+// An import with no shim stops the run and names itself â€” that list is the M2 work queue.
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -170,6 +170,25 @@ int host_run_guest(CPU *c, uint32_t entry) {
         fprintf(stderr, "[host] TRAP (thread %u): %s at %#x (EIP~%#x)\n", G32(REG(c, 272) + 0x24),
                 trap_name(trap_code), trap_addr, (uint32_t)LD(c->r + 644, 4));
         rt_calltrace_dump();
+        fprintf(stderr,"[guest-state] eax=%#x ecx=%#x edx=%#x ebx=%#x esp=%#x ebp=%#x esi=%#x edi=%#x\n",
+            REG(c,0),REG(c,4),REG(c,8),REG(c,12),REG(c,16),REG(c,20),REG(c,24),REG(c,28));
+        uint32_t sp=REG(c,16), object=REG(c,4);
+        if(sp<=0xffffffbfu) {
+            fprintf(stderr,"[guest-stack] @%#x",sp);
+            for(int i=0;i<16;i++) fprintf(stderr," %#x",G32(sp+4u*i));
+            fprintf(stderr,"\n");
+        }
+        if(object<=0xffffffdfu) {
+            fprintf(stderr,"[guest-ecx-object] @%#x",object);
+            for(int i=0;i<8;i++) fprintf(stderr," %#x",G32(object+4u*i));
+            uint32_t vt=G32(object);
+            fprintf(stderr,"\n");
+            if(vt && vt<=0xffffffdfu) {
+                fprintf(stderr,"[guest-object-vtable] @%#x",vt);
+                for(int i=0;i<8;i++) fprintf(stderr," %#x",G32(vt+4u*i));
+                fprintf(stderr,"\n");
+            }
+        }
         trap_jb = saved;
         return trap_code;
     }

@@ -2,6 +2,9 @@
 """Build a native macOS startup diagnostic; never package it as an iPhone app."""
 import argparse
 import concurrent.futures
+import hashlib
+import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -17,6 +20,7 @@ def main():
     parser.add_argument('--discovery-prefix', type=Path, help='optional installed Unicorn prefix for a separate Mac discovery binary')
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--jobs', type=int, default=2)
+    parser.add_argument('--cache', type=Path, help='private, verified object cache for this compiler/SDK/header configuration')
     args = parser.parse_args()
     if not args.host_check and not (args.generated and (args.generated/'table.c').is_file()
                                    and (args.generated/'stubs.c').is_file()):
@@ -29,19 +33,42 @@ def main():
         sources += [args.generated/'table.c', args.generated/'stubs.c', *sorted(args.generated.glob('tu_*.c'))]
     args.out.mkdir(parents=True, exist_ok=True)
     binary = args.out/'fnv-startup'
+    cache=args.cache
+    old_manifest={}
+    if cache:
+        cache.mkdir(parents=True,exist_ok=True)
+        if (cache/'manifest.json').is_file():
+            old_manifest=json.loads((cache/'manifest.json').read_text())
     with tempfile.TemporaryDirectory(dir=args.out) as temp:
         tmp = Path(temp)
         base = [cc, '-isysroot', sdk, '-O1', '-DRT_CALLTRACE', '-I', str(R), '-I', str(H), '-I', str(ROOT/'ios')]
         if args.host_check:
             base.append('-DFNV_STARTUP_HOST_CHECK')
+        signature=hashlib.sha256(json.dumps(base).encode()+subprocess.check_output([cc,'--version']))
+        for directory in [R,H,ROOT/'ios']:
+            for header in sorted(directory.glob('*.h')):
+                signature.update(str(header.relative_to(ROOT)).encode()+header.read_bytes())
+        config=signature.digest()
         def compile_one(item):
             index, source = item
-            obj = tmp/f'{index}.o'
+            key=hashlib.sha256(config+source.name.encode()+source.read_bytes()).hexdigest()
+            stored=cache/(key+'.o') if cache else None
+            if stored and stored.is_file() and hashlib.sha256(stored.read_bytes()).hexdigest()==old_manifest.get(stored.name):
+                return source, str(stored), True
+            obj=tmp/f'{index}.o'
             subprocess.run(base + (['-fobjc-arc'] if source.suffix == '.m' else [])
                            + ['-c', str(source), '-o', str(obj)], check=True)
-            return str(obj)
+            if stored:
+                os.replace(obj,stored)
+                obj=stored
+            return source, str(obj), False
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            objects = list(pool.map(compile_one, enumerate(sources)))
+            compiled = list(pool.map(compile_one, enumerate(sources)))
+        objects=[obj for _,obj,_ in compiled]
+        if cache:
+            manifest={Path(obj).name:hashlib.sha256(Path(obj).read_bytes()).hexdigest() for _,obj,_ in compiled}
+            (cache/'manifest.json').write_text(json.dumps(manifest,indent=2))
+        print(f'Native objects: {sum(reused for _,_,reused in compiled)} reused, {sum(not reused for _,_,reused in compiled)} compiled',flush=True)
         frameworks = ['Foundation', 'AVFoundation', 'CoreGraphics', 'CoreMedia', 'CoreVideo', 'ImageIO', 'UniformTypeIdentifiers']
         link = [cc, '-isysroot', sdk, *objects, *[v for f in frameworks for v in ('-framework', f)],
                 '-Wl,-stack_size,0x1000000']

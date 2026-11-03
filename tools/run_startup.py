@@ -22,7 +22,7 @@ def main():
     args = parser.parse_args()
     binary, exe = args.binary.resolve(), args.exe.resolve()
     args.out.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ, FNV_ROOT=str(exe.parent), FNV_TRACE_FILES='1', FNV_QUIT_AFTER='1')
+    env = dict(os.environ, FNV_ROOT=str(exe.parent), FNV_TRACE_FILES='1', FNV_QUIT_AFTER='1', FNV_FALLBACK_TRACE='1')
     log = args.out/f'{args.label}-startup.log'
     timed_out = False
     with log.open('wb') as stream:
@@ -43,6 +43,10 @@ def main():
         entries = sorted({int(line, 0) for line in roots.read_text().splitlines() if line.strip()})
         (args.out/'fallback_entries.txt').write_text(''.join(f'{entry:#x}\n' for entry in entries))
         receipt['fallback_entries'] = [f'{entry:#x}' for entry in entries]
+    if args.label == 'discovery':
+        for evidence in exe.parent.glob('fallback-*'):
+            if evidence.is_file() and evidence.suffix in ('.bin','.jsonl','.json'):
+                (args.out/evidence.name).write_bytes(evidence.read_bytes())
     (args.out/f'{args.label}-startup-result.json').write_text(json.dumps(receipt, indent=2))
     print(json.dumps(receipt, indent=2))
     print(text[-10000:])
