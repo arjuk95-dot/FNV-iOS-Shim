@@ -182,8 +182,9 @@ int host_run_guest(CPU *c, uint32_t entry) {
     jmp_buf *saved = trap_jb;
     trap_jb = &jb;
     if (setjmp(jb)) {
-        fprintf(stderr, "[host] TRAP (thread %u): %s at %#x (EIP~%#x)\n", G32(REG(c, 272) + 0x24),
-                trap_name(trap_code), trap_addr, (uint32_t)LD(c->r + 644, 4));
+        uint32_t trap_sp=REG(c,16);
+        fprintf(stderr, "[host] TRAP (thread %u): %s at %#x (EIP~%#x, stack_return=%#x)\n", G32(REG(c, 272) + 0x24),
+                trap_name(trap_code), trap_addr, (uint32_t)LD(c->r + 644, 4),trap_sp<=0xfffffffbu?G32(trap_sp):0);
         rt_calltrace_dump();
         fprintf(stderr,"[guest-state] eax=%#x ecx=%#x edx=%#x ebx=%#x esp=%#x ebp=%#x esi=%#x edi=%#x\n",
             REG(c,0),REG(c,4),REG(c,8),REG(c,12),REG(c,16),REG(c,20),REG(c,24),REG(c,28));

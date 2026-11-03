@@ -148,6 +148,13 @@ def main():
                    written_memory_differences=memory,reference_targets=[hex(t) for t in sorted(targets&visited)])
         row['absolute_result_error']=abs(actual-expected) if math.isfinite(actual) and math.isfinite(expected) else None
         row['ulp_result_error']=abs(actual-expected)/math.ulp(expected) if math.isfinite(actual) and math.isfinite(expected) else None
+        row['native_control_word']=hex(worker.getreg('FPUControlWord',2))
+        row['x86_control_word']=hex(mu.reg_read(UC_X86_REG_FPCW))
+        def as_f32(number):
+            try:return struct.pack('<f',number).hex()
+            except OverflowError:return struct.pack('<f',math.copysign(math.inf,number)).hex()
+        row['result_rounded_to_f32']={'native':as_f32(actual),'x86':as_f32(expected),
+                                      'equal':as_f32(actual)==as_f32(expected)}
         results.append(row)
     report=dict(kind='snapshot_based_controlled_fixture',initial_image_globals=True,
                 enclosing_wrapper=wrapper,
