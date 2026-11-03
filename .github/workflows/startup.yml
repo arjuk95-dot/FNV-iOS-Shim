@@ -18,6 +18,9 @@ on:
       cache_run_id:
         description: Optional prior private run with one-day native object artifact
         type: string
+      trace_entries:
+        description: Optional comma-separated guest entries for read-only receiver/argument probes
+        type: string
 permissions:
   contents: read
 jobs:
@@ -30,6 +33,7 @@ jobs:
       INPUT_SHA256: ${{ inputs.input_sha256 }}
       EXE_SHA256: ${{ inputs.executable_sha256 }}
       CACHE_RUN_ID: ${{ inputs.cache_run_id }}
+      TRACE_ENTRIES: ${{ inputs.trace_entries }}
     steps:
       - uses: actions/checkout@v4
       - name: Verify startup failure gate
@@ -61,7 +65,7 @@ jobs:
             case "$CACHE_RUN_ID" in *[!0-9]*) exit 1;; esac
             gh run download "$CACHE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name FNV-native-objects-private --dir build/native-objects
           fi
-          python3 tools/startup_build.py --generated "$RUNNER_TEMP/fnv-private/generated" --out build/startup --cache build/native-objects "${extra[@]}"
+          python3 tools/startup_build.py --generated "$RUNNER_TEMP/fnv-private/generated" --out build/startup --cache build/native-objects --trace-entries "$TRACE_ENTRIES" "${extra[@]}"
       - name: Execute strict startup with no game Data
         if: inputs.input_tag != ''
         run: python3 tools/run_startup.py build/startup/fnv-startup "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics

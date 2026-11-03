@@ -132,6 +132,17 @@ uint32_t host_image_base;
 uint8_t *host_tls_template;
 uint32_t host_tls_template_size, host_tls_block_size;
 
+// Selected generated entry probes are inserted by the diagnostic builder only.
+// The register file is read before LOAD_ENTRY; no guest state is changed.
+void rt_diag_entry(CPU *c,uint32_t entry) {
+    uint32_t sp=REG(c,R_ESP),object=REG(c,4);
+    fprintf(stderr,"[entry-state] entry=%#x return_pc=%#x eax=%#x ecx=%#x edx=%#x esp=%#x ebp=%#x arg0=%#x arg1=%#x arg2=%#x\n",
+        entry,sp<=0xfffffff0u?G32(sp):0,REG(c,0),object,REG(c,8),sp,REG(c,20),
+        sp<=0xfffffff0u?G32(sp+4):0,sp<=0xfffffff0u?G32(sp+8):0,sp<=0xfffffff0u?G32(sp+12):0);
+    if(object<=0xfffffff0u)
+        fprintf(stderr,"[entry-object] entry=%#x receiver=%#x words=%#x,%#x,%#x,%#x\n",entry,object,G32(object),G32(object+4),G32(object+8),G32(object+12));
+}
+
 int fnv_run_game(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: %s game.exe [args]\n", argv[0]); return 2; }
     void *p = fnv_reserve_guest();

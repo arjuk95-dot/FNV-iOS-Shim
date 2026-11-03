@@ -5,6 +5,7 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -21,7 +22,9 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--jobs', type=int, default=2)
     parser.add_argument('--cache', type=Path, help='private, verified object cache for this compiler/SDK/header configuration')
+    parser.add_argument('--trace-entries', default='', help='comma-separated selected guest entry addresses for read-only state probes')
     args = parser.parse_args()
+    trace_entries={int(value,0) for value in args.trace_entries.split(',') if value.strip()}
     if not args.host_check and not (args.generated and (args.generated/'table.c').is_file()
                                    and (args.generated/'stubs.c').is_file()):
         parser.error('Provide a complete --generated directory or use --host-check')
@@ -51,13 +54,29 @@ def main():
         config=signature.digest()
         def compile_one(item):
             index, source = item
-            key=hashlib.sha256(config+source.name.encode()+source.read_bytes()).hexdigest()
+            content=source.read_bytes()
+            transformed=False
+            if trace_entries and args.generated and source.parent.resolve()==args.generated.resolve():
+                def probe(match):
+                    nonlocal transformed
+                    entry=int(match.group(1),16)
+                    if entry not in trace_entries:return match.group(0)
+                    transformed=True
+                    return match.group(0)+f'rt_diag_entry(c,0x{entry:x}u);'.encode()
+                content=re.sub(rb'RT_ENTER\(0x([0-9a-f]+)u\);',probe,content)
+                if transformed:
+                    content=content.replace(b'#include "rt.h"',b'#include "rt.h"\nvoid rt_diag_entry(CPU *,uint32_t);',1)
+            key=hashlib.sha256(config+source.name.encode()+content).hexdigest()
             stored=cache/(key+'.o') if cache else None
             if stored and stored.is_file() and hashlib.sha256(stored.read_bytes()).hexdigest()==old_manifest.get(stored.name):
                 return source, str(stored), True
             obj=tmp/f'{index}.o'
+            compiled_source=source
+            if transformed:
+                compiled_source=tmp/('probe-'+source.name)
+                compiled_source.write_bytes(content)
             subprocess.run(base + (['-fobjc-arc'] if source.suffix == '.m' else [])
-                           + ['-c', str(source), '-o', str(obj)], check=True)
+                           + ['-c', str(compiled_source), '-o', str(obj)], check=True)
             if stored:
                 os.replace(obj,stored)
                 obj=stored
