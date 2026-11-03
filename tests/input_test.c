@@ -4,6 +4,10 @@
 #include "FNVTouchMath.h"
 #include "input.h"
 
+/* The input-only test does not link the guest heap. Darwin still requires
+ * the optional diagnostic hook to be supplied at static link time. */
+void gheap_report(void) {}
+
 /* Link to upstream's unmodified input.c. This tests the host polling boundary. */
 static void send(FNVLook *look, double x, double y, double gain) {
     FNVMouseDelta v = FNVLookTo(look, x, y, gain);
