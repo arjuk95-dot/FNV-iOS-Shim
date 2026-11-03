@@ -7,6 +7,7 @@
 #include <stdlib.h>
 uint8_t *MEM;HostImport host_imports[MAX_IMPORTS];int host_import_count;static unsigned heap=0x80000;static int failed;
 uint32_t gmalloc(uint32_t n){unsigned p=heap;heap+=n+16;return p;}void gfree(uint32_t p){(void)p;}
+void gheap_report(void){}
 void rt_trap(CPU *c,int n,uint32_t a){(void)c;(void)n;(void)a;abort();}
 void fnv_input_mouse_camera(CPU *,uint32_t);extern const ShimTable xinput_shims;
 static void check(const char *name,int ok){printf("%s: %s\n",ok?"PASS":"FAIL",name);failed+=!ok;}
