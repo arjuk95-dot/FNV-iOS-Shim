@@ -20,7 +20,7 @@ def main():
     parser.add_argument('exe', type=Path)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--timeout', type=int, default=60)
-    parser.add_argument('--label', choices=['strict', 'discovery','synthetic','synthetic-discovery'], default='strict')
+    parser.add_argument('--label', choices=['strict', 'discovery','synthetic','synthetic-discovery','synthetic-bsa','synthetic-bsa-discovery','synthetic-bsa-raw','synthetic-bsa-raw-discovery'], default='strict')
     args = parser.parse_args()
     binary, exe = args.binary.resolve(), args.exe.resolve()
     fixture=None
@@ -29,9 +29,8 @@ def main():
         # successful return. No original game asset or owner INI is uploaded.
         fixture=tempfile.TemporaryDirectory(prefix='fnv-synthetic-ui-')
         directory=Path(fixture.name);shutil.copyfile(exe,directory/exe.name);exe=directory/exe.name
-        menus=directory/'Data/Menus';menus.mkdir(parents=True)
-        (menus/'globals.xml').write_text('<rect name="Strings"><_background_fill_alpha>32</_background_fill_alpha><_Has360Controller>0</_Has360Controller></rect>\n')
-        (directory/'Fallout_default.ini').write_text('[Archive]\nbUseArchives=1\nSArchiveList=\n')
+        from startup.synthetic_assets import prepare
+        prepare(directory,packed='bsa' in args.label,compressed='raw' not in args.label)
     args.out.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, FNV_ROOT=str(exe.parent), FNV_TRACE_FILES='1', FNV_QUIT_AFTER='1', FNV_FALLBACK_TRACE='1')
     log = args.out/f'{args.label}-startup.log'

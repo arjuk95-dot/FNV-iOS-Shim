@@ -117,6 +117,15 @@ jobs:
       - name: Reference the same synthetic fixture on Mac
         if: always() && inputs.input_tag != '' && inputs.discovery && steps.native_build.outcome == 'success'
         run: python3 tools/run_startup.py build/startup/fnv-discovery "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics --label synthetic-discovery
+      - name: Exercise compressed author-created BSA loading
+        if: always() && inputs.input_tag != '' && steps.native_build.outcome == 'success'
+        run: python3 tools/run_startup.py build/startup/fnv-startup "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics --label synthetic-bsa
+      - name: Reference compressed author-created BSA loading
+        if: always() && inputs.input_tag != '' && inputs.discovery && steps.native_build.outcome == 'success'
+        run: python3 tools/run_startup.py build/startup/fnv-discovery "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics --label synthetic-bsa-discovery
+      - name: Exercise uncompressed author-created BSA loading
+        if: always() && inputs.input_tag != '' && steps.native_build.outcome == 'success'
+        run: python3 tools/run_startup.py build/startup/fnv-startup "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics --label synthetic-bsa-raw
       - uses: actions/upload-artifact@v4
         if: always() && inputs.input_tag != ''
         with:
