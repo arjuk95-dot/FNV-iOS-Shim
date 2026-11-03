@@ -4,6 +4,7 @@
 #include <string.h>
 #include <TargetConditionals.h>
 void fnv_video_all_active(int active);
+void fnv_dshow_all_active(int active);
 static AVAudioEngine *audioEngine;
 static AVAudioSourceNode *audioSource;
 static BOOL mediaActive=YES;
@@ -34,4 +35,5 @@ int fnv_audio_start(void){
 void fnv_media_active(int active){
     @synchronized(AVAudioEngine.class){mediaActive=!!active;if(!active)[audioEngine pause];else if(audioEngine)fnv_audio_start();}
     fnv_video_all_active(active);
+    fnv_dshow_all_active(active);
 }

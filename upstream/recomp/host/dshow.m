@@ -18,6 +18,10 @@
 
 static NSMutableDictionary<NSNumber *, DSGraph *> *graphs;
 static uint32_t next_gid = 1;
+static BOOL audioActive=YES;
+void fnv_dshow_all_active(int active){
+    @synchronized(DSGraph.class){audioActive=!!active;for(DSGraph *g in graphs.allValues){if(!active)[g.player pause];else if(g.running)[g.player play];}}
+}
 enum { I_GRAPH, I_CONTROL, I_EVENT, I_AUDIO, I_SEEKING, I_POSITION, I_COUNT };
 static uint32_t vt[I_COUNT];
 
@@ -69,14 +73,14 @@ static void GB_RenderFile(CPU *c) {
     RET(c, 0, 3);
 }
 // IMediaControl
-static void MC_Run(CPU *c) { DSGraph *g = G(c); [g.player play]; g.running = YES; RET(c, 0, 1); }
+static void MC_Run(CPU *c) { DSGraph *g = G(c); @synchronized(DSGraph.class){g.running = YES;if(audioActive)[g.player play];} RET(c, 0, 1); }
 static void MC_Pause(CPU *c) { DSGraph *g = G(c); [g.player pause]; g.running = NO; RET(c, 0, 1); }
 static void MC_Stop(CPU *c) { DSGraph *g = G(c); [g.player stop]; g.running = NO; RET(c, 0, 1); }
 static void MC_GetState(CPU *c) { DSGraph *g = G(c); P32(ARG(c, 2), g.player.playing ? 2 : g.running ? 1 : 0); RET(c, 0, 3); }
 // IMediaEventEx: EC_COMPLETE once the track has played out
 static void ME_GetEvent(CPU *c) {
     DSGraph *g = G(c);
-    if (g.running && g.player && !g.player.playing && !g.completed_reported) {
+    if (audioActive && g.running && g.player && !g.player.playing && !g.completed_reported) {
         g.completed_reported = YES; g.complete = YES; g.running = NO;
         P32(ARG(c, 1), 1 /* EC_COMPLETE */); P32(ARG(c, 2), 0); P32(ARG(c, 3), 0);
         RET(c, 0, 5); return;
@@ -136,6 +140,7 @@ static const ComMethod position_m[] = {UNK, DISP, M("get_Duration", MP_get_Durat
 
 // called by the CoCreateInstance shim for CLSID_FilterGraph
 uint32_t dshow_create_filtergraph(uint32_t iid) {
+    @synchronized(DSGraph.class){
     if (!graphs) {
         graphs = [NSMutableDictionary dictionary];
 #define V(i, m) vt[i] = com_vtable(#m, m, (int)(sizeof m / sizeof *m))
@@ -147,4 +152,5 @@ uint32_t dshow_create_filtergraph(uint32_t iid) {
     graphs[@(gid)] = g;
     (void)iid;
     return iface(g, gid, I_GRAPH);
+    }
 }
