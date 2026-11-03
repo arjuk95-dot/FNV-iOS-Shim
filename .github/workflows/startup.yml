@@ -91,13 +91,18 @@ jobs:
         if: always() && inputs.differential_entries != '' && steps.native_build.outcome == 'success'
         run: |
           mkdir -p build/diagnostics
-          python3 tools/differential/difftest.py "$RUNNER_TEMP/fnv-private/FalloutNV.exe" build/startup/libfnv-differential.dylib tools/differential/ghidra-x86-registers.json build/diagnostics/differential.json --only "$DIFF_ENTRIES" --trials 12 --jobs 2
+          extra=()
+          if [ -f "$RUNNER_TEMP/fnv-private/diagnostic-fixtures.json" ]; then extra=(--fixtures "$RUNNER_TEMP/fnv-private/diagnostic-fixtures.json"); fi
+          python3 tools/differential/difftest.py "$RUNNER_TEMP/fnv-private/FalloutNV.exe" build/startup/libfnv-differential.dylib tools/differential/ghidra-x86-registers.json build/diagnostics/differential.json --only "$DIFF_ENTRIES" --trials 12 --jobs 2 "${extra[@]}"
       - name: Replay captured CRT math context against original x86
         if: always() && inputs.snapshot_run_id != '' && steps.native_build.outcome == 'success'
         run: |
           case "$SNAPSHOT_RUN_ID" in *[!0-9]*) exit 1;; esac
           gh run download "$SNAPSHOT_RUN_ID" --repo "$GITHUB_REPOSITORY" --name FNV-startup-diagnostics-private --dir build/reference-snapshots
           python3 tools/differential/replay_math_snapshot.py "$RUNNER_TEMP/fnv-private/FalloutNV.exe" build/startup/libfnv-differential.dylib build/reference-snapshots --out build/diagnostics/math-differential.json
+      - name: Compare the enclosing CRT wrapper return
+        if: always() && inputs.snapshot_run_id != '' && steps.native_build.outcome == 'success'
+        run: python3 tools/differential/replay_math_snapshot.py "$RUNNER_TEMP/fnv-private/FalloutNV.exe" build/startup/libfnv-differential.dylib build/reference-snapshots --whole-wrapper --out build/diagnostics/math-wrapper-differential.json
       - name: Execute strict startup with no game Data
         if: always() && inputs.input_tag != '' && steps.native_build.outcome == 'success'
         run: python3 tools/run_startup.py build/startup/fnv-startup "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --out build/diagnostics

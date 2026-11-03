@@ -34,6 +34,7 @@ def main():
     parser.add_argument('--registers',type=Path,default=Path(__file__).with_name('ghidra-x86-registers.json'))
     parser.add_argument('--entry',type=lambda s:int(s,0))
     parser.add_argument('--targets',default='')
+    parser.add_argument('--whole-wrapper',action='store_true',help='reconstruct the verified enclosing CRT caller frame and test its public return')
     parser.add_argument('--out',type=Path,required=True)
     args=parser.parse_args()
     image,_=load_pe(args.exe)
@@ -55,6 +56,20 @@ def main():
            ('ten',10.0),('negative_ten',-10.0),('positive_infinity',math.inf),('negative_infinity',-math.inf),('quiet_nan',math.nan)]
     targets={int(value,0) for value in args.targets.split(',')} if args.targets else set(struct.unpack_from('<4I',image,metadata['gpr'][2]-IMAGE_BASE+16))
     registers=json.loads(args.registers.read_text())
+    wrapper=None
+    if args.whole_wrapper:
+        record=metadata['gpr'][2]
+        needle=b'\xba'+struct.pack('<I',record)+b'\xe9'
+        position=image.find(needle)
+        if position<0:raise ValueError('No MOV EDX operation record / JMP wrapper')
+        target=IMAGE_BASE+position+10+struct.unpack_from('<i',image,position+6)[0]
+        code=image[target-IMAGE_BASE:target-IMAGE_BASE+10]
+        if code[:5]!=b'\x55\x8b\xec\x81\xc4' or code[9]!=0x53:
+            raise ValueError('Unrecognized enclosing caller frame; do not guess its layout')
+        allocation=-struct.unpack_from('<i',code,5)[0]
+        if not 0<allocation<0x1000:raise ValueError('Invalid caller frame allocation')
+        wrapper=dict(entry=IMAGE_BASE+position,frame_allocation=allocation,target=target)
+        args.entry=wrapper['entry']
     results=[]
     for name,value in cases:
         worker=Worker(args.exe,args.library,registers);mu=worker.mu
@@ -66,6 +81,21 @@ def main():
             for page in range(base,base+len(data),4096):
                 if page not in mapped:mu.mem_map(page,4096);mapped.add(page)
             worker.poke(base,data);regions[base]=len(data)
+        return_pc=metadata['return_pc']
+        active_cpu=bytearray(cpu)
+        if wrapper:
+            frame=metadata['gpr'][5]
+            def word(address):return struct.unpack('<I',mu.mem_read(address,4))[0]
+            return_pc=word(frame+4)
+            struct.pack_into('<I',active_cpu,16,frame+4)
+            struct.pack_into('<I',active_cpu,20,word(frame))
+            struct.pack_into('<I',active_cpu,12,word(frame-wrapper['frame_allocation']-4))
+            active_cpu[8900]=0;active_cpu[4240:4244]=b'\0'*4
+            active_cpu[4258:4260]=b'\0'*2
+            active_cpu[4352:4480]=b'\0'*128
+            active_cpu[4256:4258]=bytes(mu.mem_read(frame-0xa4,2))
+            worker.poke(frame+8,struct.pack('<d',value))
+            ctypes.memmove(ctypes.addressof(worker.cpu),bytes(active_cpu),len(active_cpu))
         # Rebuild flat 32-bit segmentation, with FS referring to the captured TEB.
         teb=metadata['teb_base'];gdt=teb+0x1f00
         def desc(base,limit,access,flags):
@@ -76,24 +106,23 @@ def main():
         mu.reg_write(UC_X86_REG_GDTR,(0,gdt,len(table)-1,0));mu.reg_write(UC_X86_REG_CS,8)
         for segment in [UC_X86_REG_SS,UC_X86_REG_DS,UC_X86_REG_ES]:mu.reg_write(segment,16)
         mu.reg_write(UC_X86_REG_FS,24)
-        for i,reg in enumerate(GPRS):mu.reg_write(UC_GPR[reg],struct.unpack_from('<I',cpu,4*i)[0])
+        for i,reg in enumerate(GPRS):mu.reg_write(UC_GPR[reg],struct.unpack_from('<I',active_cpu,4*i)[0])
         flags=2
         for reg,bit in FLAGS.items():flags|=(worker.getreg(reg,1)&1)<<bit
         flags|=(cpu[522]&1)<<10
         mu.reg_write(UC_X86_REG_EFLAGS,flags)
-        top=cpu[8900]&7
-        struct.pack_into('<d',worker.cpu,4352,value)
+        top=active_cpu[8900]&7
+        if not wrapper:struct.pack_into('<d',worker.cpu,4352,value)
         for i in range(8):
-            number=value if i==0 else struct.unpack_from('<d',cpu,4352+16*i)[0]
+            number=value if i==0 and not wrapper else struct.unpack_from('<d',active_cpu,4352+16*i)[0]
             mu.reg_write(UC_X86_REG_FP0+((top+i)&7),f80(number))
-        sw=(top<<11)|((cpu[4240]&1)<<8)|((cpu[4241]&1)<<9)|((cpu[4242]&1)<<10)|((cpu[4243]&1)<<14)
-        mu.reg_write(UC_X86_REG_FPSW,sw);mu.reg_write(UC_X86_REG_FPTAG,0)
-        mu.reg_write(UC_X86_REG_FPCW,struct.unpack_from('<H',cpu,4256)[0]);mu.reg_write(UC_X86_REG_MXCSR,0x1f80)
+        sw=(top<<11)|((active_cpu[4240]&1)<<8)|((active_cpu[4241]&1)<<9)|((active_cpu[4242]&1)<<10)|((active_cpu[4243]&1)<<14)
+        mu.reg_write(UC_X86_REG_FPSW,sw);mu.reg_write(UC_X86_REG_FPTAG,0xffff if wrapper else 0)
+        mu.reg_write(UC_X86_REG_FPCW,struct.unpack_from('<H',active_cpu,4256)[0]);mu.reg_write(UC_X86_REG_MXCSR,0x1f80)
         for i in range(8):mu.reg_write(UC_X86_REG_XMM0+i,int.from_bytes(cpu[4608+64*i:4624+64*i],'little'))
         visited=set();writes=[]
         mu.hook_add(UC_HOOK_CODE,lambda u,a,s,d:visited.add(a))
         mu.hook_add(UC_HOOK_MEM_WRITE,lambda u,t,a,s,v,d:writes.append((a,s)))
-        return_pc=metadata['return_pc']
         row=dict(case=name,input=repr(value),entry=hex(args.entry))
         try:mu.emu_start(args.entry,return_pc,count=200000)
         except UcError as error:
@@ -117,8 +146,11 @@ def main():
                    native_result=repr(actual),x86_result=repr(expected),gpr_differences=gpr_diffs,
                    native_top=worker.cpu[8900],x86_top=expected_top,flag_differences=flag_diffs,
                    written_memory_differences=memory,reference_targets=[hex(t) for t in sorted(targets&visited)])
+        row['absolute_result_error']=abs(actual-expected) if math.isfinite(actual) and math.isfinite(expected) else None
+        row['ulp_result_error']=abs(actual-expected)/math.ulp(expected) if math.isfinite(actual) and math.isfinite(expected) else None
         results.append(row)
     report=dict(kind='snapshot_based_controlled_fixture',initial_image_globals=True,
+                enclosing_wrapper=wrapper,
                 original_runtime_snapshot=str(args.snapshot.name),results=results,
                 entry_count_is_not_correctness_evidence=True)
     args.out.parent.mkdir(parents=True,exist_ok=True)

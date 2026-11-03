@@ -19,7 +19,7 @@ def sha(path):
 
 
 def allowed(name):
-    return name == 'FalloutNV.exe' or bool(re.fullmatch(r'generated/(?:table|stubs|tu_[0-9a-fA-F]+)\.c', name))
+    return name in ('FalloutNV.exe','diagnostic-fixtures.json') or bool(re.fullmatch(r'generated/(?:table|stubs|tu_[0-9a-fA-F]+)\.c', name))
 
 
 def main():
@@ -29,6 +29,8 @@ def main():
     pack.add_argument('--exe', type=Path, required=True)
     pack.add_argument('--generated', type=Path, required=True)
     pack.add_argument('--out', type=Path, required=True)
+    pack.add_argument('--fixtures', type=Path, help='optional small diagnostic caller-state manifest; no game assets')
+    pack.add_argument('--generator',type=Path,help='record the maintained emitter identity used for this source set')
     unpack = sub.add_parser('unpack')
     unpack.add_argument('archive', type=Path)
     unpack.add_argument('destination', type=Path)
@@ -40,10 +42,15 @@ def main():
         if len(paths) < 3 or not all(path.is_file() for path in paths):
             raise ValueError('Complete generated source set required')
         sources = {'FalloutNV.exe': args.exe, **{f'generated/{path.name}': path for path in paths}}
+        if args.fixtures:
+            if args.fixtures.stat().st_size>65536:raise ValueError('Diagnostic fixtures exceed bound')
+            sources['diagnostic-fixtures.json']=args.fixtures
         if not all(allowed(name) for name in sources):
             raise ValueError('Unexpected generated source filename')
         manifest = dict(recompiler_commit=PIN, files={name: dict(bytes=path.stat().st_size, sha256=sha(path))
                                                     for name, path in sources.items()})
+        if args.generator:
+            manifest['generator']={'emitter_sha256':sha(args.generator),'flag_analysis_sha256':sha(args.generator.with_name('flaglive.py'))}
         args.out.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(args.out, 'x', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             for name, path in sources.items():

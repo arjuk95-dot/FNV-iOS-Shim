@@ -12,6 +12,7 @@ and every valid trial matches.
 """
 import argparse
 import ctypes
+import hashlib
 import json
 import math
 import subprocess
@@ -147,13 +148,16 @@ class Worker:
     def __init__(self, exe, lib, regs):
         self.img, self.writable = load_pe(exe)
         self.R = regs
-        self.lib = ctypes.CDLL(lib)
-        self.lib.rt_mem.restype = ctypes.c_void_p
-        self.lib.rt_addr.restype = ctypes.c_uint32
-        self.lib.rt_trap_addr.restype = ctypes.c_uint32
-        self.lib.rt_run.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int64]
-        self.mem = self.lib.rt_mem()
-        ctypes.memmove(self.mem + IMAGE_BASE, self.img, len(self.img))
+        self.reference_only=lib=='-'
+        self.mem=None
+        if not self.reference_only:
+            self.lib = ctypes.CDLL(lib)
+            self.lib.rt_mem.restype = ctypes.c_void_p
+            self.lib.rt_addr.restype = ctypes.c_uint32
+            self.lib.rt_trap_addr.restype = ctypes.c_uint32
+            self.lib.rt_run.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int64]
+            self.mem = self.lib.rt_mem()
+            ctypes.memmove(self.mem + IMAGE_BASE, self.img, len(self.img))
         self.cpu = (ctypes.c_uint8 * 8960)()
         self.mu = Uc(UC_ARCH_X86, UC_MODE_32)
         self.mu.mem_map(IMAGE_BASE, (len(self.img) + 0xFFF) & ~0xFFF)
@@ -175,10 +179,10 @@ class Worker:
         for seg in (UC_X86_REG_SS, UC_X86_REG_DS, UC_X86_REG_ES):
             self.mu.reg_write(seg, 2 << 3)
         self.mu.reg_write(UC_X86_REG_FS, 3 << 3)
-        ctypes.memmove(self.mem + gdt, table, len(table))
+        if self.mem:ctypes.memmove(self.mem + gdt, table, len(table))
         self.regions = [(SCRATCH, SCRATCH_SIZE), (STACK, STACK_SIZE), (TEB, 0x1000)] + self.writable
         self.pristine = {a: self.img[a - IMAGE_BASE:a - IMAGE_BASE + n] for a, n in self.writable}
-        self.index = {self.lib.rt_addr(i): i for i in range(self.lib.rt_count())}
+        self.index = {} if self.reference_only else {self.lib.rt_addr(i): i for i in range(self.lib.rt_count())}
 
     def setreg(self, name, val, size=4):
         off, _ = self.R[name]
@@ -191,7 +195,7 @@ class Worker:
         return int.from_bytes(bytes(self.cpu[off:off + (size or sz)]), "little")
 
     def poke(self, addr, data):
-        ctypes.memmove(self.mem + addr, data, len(data))
+        if self.mem:ctypes.memmove(self.mem + addr, data, len(data))
         self.mu.mem_write(addr, data)
 
     def trial(self, entry, rng):
@@ -237,12 +241,28 @@ class Worker:
             self.setreg(f"XMM{i}", v, 16)
             mu.reg_write(UC_X86_REG_XMM0 + i, v)
 
+        fixtures=getattr(self,'fixtures',{}).get(hex(entry),[])
+        if fixtures:
+            fixture=fixtures[self.fixture_index % len(fixtures)]
+            self.fixture_index+=1
+            for reg,value in fixture.get('registers',{}).items():
+                self.setreg(reg,value);mu.reg_write(UC_GPR[reg],value)
+            for write in fixture.get('writes',[]):
+                self.poke(write['address'],bytes.fromhex(write['hex']))
+            if 'return_offset' in fixture:
+                self.poke(ESP0+fixture['return_offset'],struct.pack('<I',MAGIC_RET))
+            if 'df' in fixture:
+                flags=mu.reg_read(UC_X86_REG_EFLAGS)&~(1<<10)
+                mu.reg_write(UC_X86_REG_EFLAGS,flags|(fixture['df']<<10))
+                self.setreg('DF',fixture['df'],1)
+
         try:
             mu.emu_start(entry, MAGIC_RET, count=BUDGET)
         except UcError as e:
-            return "invalid", f"unicorn: {e}"
+            return "invalid", f"unicorn: {e} pc={mu.reg_read(UC_X86_REG_EIP):#x}"
         if mu.reg_read(UC_X86_REG_EIP) != MAGIC_RET:
             return "invalid", "unicorn budget"
+        if self.reference_only:return 'reference-valid','native comparison not performed'
 
         rc = self.lib.rt_run(self.index[entry], ctypes.addressof(self.cpu), BUDGET)
         if rc:
@@ -303,11 +323,21 @@ def worker_main(args):
     """Reads one hex entry per stdin line, answers one JSON line. Native crashes kill this process;
     the parent attributes the crash to the entry it was working on and starts a fresh worker."""
     w = Worker(args.exe, args.lib, json.load(open(args.regs)))
+    w.fixtures={};w.fixture_index=0
+    if args.fixtures:
+        spec=json.load(open(args.fixtures))
+        if hashlib.sha256(open(args.exe,'rb').read()).hexdigest()!=spec['executable_sha256']:
+            raise ValueError('Fixture executable identity differs')
+        w.fixtures=spec['entries']
     for line in sys.stdin:
         entry = int(line, 16)
         rng = random.Random(args.seed ^ entry)
-        result=judge(entry, [w.trial(entry, rng) for _ in range(args.trials)])
+        trials=[w.trial(entry, rng) for _ in range(args.trials)]
+        result=judge(entry,trials)
+        result['invalid_trials']=[{'trial':i,'detail':detail} for i,(verdict,detail) in enumerate(trials) if verdict=='invalid']
+        if w.reference_only and result['verdict']=='pass':result['verdict']='reference-valid'
         result['original_epilogue_return_offset']=w.epilogue_return_offset(entry)
+        result['controlled_fixtures']=len(w.fixtures.get(hex(entry),[]))
         print(json.dumps(result), flush=True)
 
 
@@ -317,6 +347,7 @@ def run_pool(args, entries):
     results = []
     cmd = [sys.executable, "-I", __file__, args.exe, args.lib, args.regs, "-", "--worker",
            "--trials", str(args.trials), "--seed", str(args.seed)]
+    if args.fixtures:cmd.extend(['--fixtures',args.fixtures])
 
     def spawn():
         return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -365,13 +396,18 @@ def main():
     ap.add_argument("--only", default="")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--worker", action="store_true")
+    ap.add_argument("--fixtures", help="private original-instruction-derived caller states")
     args = ap.parse_args()
     if args.worker:
         return worker_main(args)
 
-    probe = ctypes.CDLL(args.lib)
-    probe.rt_addr.restype = ctypes.c_uint32
-    entries = [probe.rt_addr(i) for i in range(probe.rt_count())]
+    if args.lib=='-':
+        if not args.only:ap.error('Reference-only mode requires explicit --only entries')
+        entries=[int(value,0) for value in args.only.split(',')]
+    else:
+        probe = ctypes.CDLL(args.lib)
+        probe.rt_addr.restype = ctypes.c_uint32
+        entries = [probe.rt_addr(i) for i in range(probe.rt_count())]
     if args.only:
         want = {int(x, 16) for x in args.only.split(",")}
         entries = [e for e in entries if e in want]
@@ -381,7 +417,8 @@ def main():
     summary = Counter(r["verdict"] for r in results)
     json.dump({"summary": summary, "results": results}, open(args.out, "w"), indent=0)
     print(dict(summary))
-    if not results or len(results) != len(entries) or any(r['verdict'] != 'pass' for r in results):
+    expected='reference-valid' if args.lib=='-' else 'pass'
+    if not results or len(results) != len(entries) or any(r['verdict'] != expected for r in results):
         raise SystemExit(1)
 
 

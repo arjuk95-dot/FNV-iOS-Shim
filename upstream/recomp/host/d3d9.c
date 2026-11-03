@@ -428,7 +428,15 @@ static void reap(void) {                                           // called onc
 
 static void Swap_GetBackBuffer(CPU *c) { uint32_t s = g_d3d.backbuffer; addref(s); P32(ARG(c, 3), s); RET(c, 0, 4); }
 static void Swap_GetPresentParameters(CPU *c) { memcpy(MEM + ARG(c, 1), g_d3d.pp, 56); RET(c, 0, 2); }
-static void Swap_Present(CPU *c) { d3d_backend_present(&g_d3d); reap(); RET(c, 0, 6); }
+static void present_guest(CPU *c, unsigned arguments, const char *interface) {
+    static unsigned seen;
+    unsigned first = !seen++;
+    uint32_t caller = G32(REG(c,16));
+    if (first) fprintf(stderr,"[checkpoint] first Present entered interface=%s guest_return=%#x\n",interface,caller);
+    d3d_backend_present(&g_d3d); reap(); RET(c, 0, arguments);
+    if (first) fprintf(stderr,"[checkpoint] first Present returned hresult=0 guest_return=%#x\n",caller);
+}
+static void Swap_Present(CPU *c) { present_guest(c, 6, "swapchain"); }
 static void Swap_GetDisplayMode(CPU *c) { uint32_t m = ARG(c, 1); P32(m, g_d3d.width); P32(m + 4, g_d3d.height); P32(m + 8, 60); P32(m + 12, 22); RET(c, 0, 2); }
 static const Ov swap_ov[] = {{"QueryInterface", Unk_QueryInterface}, {"AddRef", Unk_AddRef}, {"Release", Unk_Release},
                              {"Present", Swap_Present}, {"GetBackBuffer", Swap_GetBackBuffer}, {"GetDisplayMode", Swap_GetDisplayMode},
@@ -450,7 +458,7 @@ static void Dev_Reset(CPU *c) {
     d3d_backend_resize(&g_d3d);
     RET(c, 0, 2);
 }
-static void Dev_Present(CPU *c) { d3d_backend_present(&g_d3d); reap(); RET(c, 0, 5); }
+static void Dev_Present(CPU *c) { present_guest(c, 5, "device"); }
 static void Dev_GetBackBuffer(CPU *c) { uint32_t s = g_d3d.backbuffer; addref(s); P32(ARG(c, 4), s); RET(c, 0, 5); }
 static void Dev_GetRasterStatus(CPU *c) { memset(MEM + ARG(c, 2), 0, 8); RET(c, 0, 3); }
 static void Dev_CreateTexture(CPU *c) {
