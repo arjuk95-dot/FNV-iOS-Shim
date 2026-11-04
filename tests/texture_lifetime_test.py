@@ -11,7 +11,7 @@ with tempfile.TemporaryDirectory() as temp:
         str(root/'tests/texture_lifetime_test.c'),str(root/'ios/FNVDisplay.c'),
         *[str(host/(n+'.c')) for n in ['d3d9_null','gheap','com']],'-o',str(binary)],check=True)
     failed=[]
-    for mode in ['bound-get-rebind','texture-stages','stream-index','render-target-depth']:
+    for mode in ['bound-get-rebind','texture-stages','stream-index','render-target-depth']+([] if args.reference else ['shader-declaration']):
         result=subprocess.run([str(binary),mode],timeout=20)
         if result.returncode:failed.append(mode)
     if args.reference:assert len(failed)==4,failed;print('Historical lifetime failures reproduced:',failed)

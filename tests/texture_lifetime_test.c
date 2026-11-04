@@ -62,6 +62,14 @@ int main(int argc,char **argv){
         CALL(Dev_SetDepthStencilSurface,0,d);CALL(Dev_SetDepthStencilSurface,0,d);CHECK(G32(d+4)==2);
         CALL(Dev_SetRenderTarget,0,0,0);CALL(Dev_SetDepthStencilSurface,0,0);CHECK(G32(b+4)==1&&G32(d+4)==1);
         CALL(Unk_Release,a);CALL(Unk_Release,b);CALL(Unk_Release,d);reap_all();CHECK(ngrave==0);
+    }else if(!strcmp(mode,"shader-declaration")){
+        uint32_t vs=newobj(vt_vs,K_VS,0,3),ps=newobj(vt_ps,K_PS,0,3),decl=newobj(vt_decl,K_DECL,0,2);
+        CALL(Dev_SetVertexShader,0,vs);CALL(Dev_SetPixelShader,0,ps);CALL(Dev_SetVertexDeclaration,0,decl);
+        CHECK(G32(vs+4)==2&&G32(ps+4)==2&&G32(decl+4)==2);
+        CALL(Dev_SetVertexShader,0,vs);CALL(Dev_SetPixelShader,0,ps);CALL(Dev_SetVertexDeclaration,0,decl);
+        CHECK(G32(vs+4)==2&&G32(ps+4)==2&&G32(decl+4)==2);
+        CALL(Dev_SetVertexShader,0,0);CALL(Dev_SetPixelShader,0,0);CALL(Dev_SetFVF,0,0x112);
+        CHECK(G32(vs+4)==1&&G32(ps+4)==1&&G32(decl+4)==1);
     }else return 2;
     printf("%s: %s\n",good?"PASS":"FAIL",mode);return good?0:1;
 }

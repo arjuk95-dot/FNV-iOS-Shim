@@ -10,7 +10,7 @@ with tempfile.TemporaryDirectory() as temp:
         str(root/'tests/texture_copy_test.c'),str(root/'ios/FNVDisplay.c'),
         *[str(host/(n+'.c')) for n in ['d3d9_null','gheap','com']],'-o',str(binary)],check=True)
     failed=[]
-    for mode in ['surface','texture']:
+    for mode in (['surface','texture'] if args.reference else ['surface','texture','cube-chain','rectangle']):
         for fmt in [int.from_bytes(n.encode(),'little') for n in ['DXT1','DXT3','DXT5','ATI1','ATI2']]+[21]:
             result=subprocess.run([str(binary),mode,str(fmt)],timeout=20)
             if result.returncode:failed.append((mode,fmt))

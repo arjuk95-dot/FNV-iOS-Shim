@@ -60,21 +60,25 @@ static uint32_t newobj(uint32_t vt, int kind, uint32_t dev, int nfields) {
     P32(o, vt); P32(o + 4, 1); P32(o + 8, (uint32_t)kind); P32(o + 12, dev);
     return o;
 }
-static void addref(uint32_t o) { if (o) P32(o + 4, G32(o + 4) + 1); }
+static void addref(uint32_t o) { if (o) __atomic_fetch_add((uint32_t *)(void *)(MEM + o + 4), 1, __ATOMIC_RELAXED); }
 static void Unk_QueryInterface(CPU *c) { addref(COM_THIS(c)); P32(ARG(c, 2), COM_THIS(c)); RET(c, 0, 3); }
 static void Unk_AddRef(CPU *c) { addref(COM_THIS(c)); RET(c, G32(COM_THIS(c) + 4), 1); }
-// Released resources are freed (guest memory back to the heap) a few frames later, and only once
-// nothing in the device state still points at them: D3D9's Set* calls hold a reference that this
-// layer doesn't count, and draws already encoded may still read the guest object. Shaders and
+// Device bindings own real references. Released resources are freed a few frames later because
+// draws already encoded may still read the guest object. Shaders and
 // declarations are never freed â€” the pipeline cache is keyed by their addresses.
 static void bury(uint32_t o);
-static void Unk_Release(CPU *c) {
-    uint32_t o = COM_THIS(c), r = G32(o + 4);
-    if (!r) { RET(c, 0, 1); return; }          // over-release: ignore (never free twice)
-    r--;
-    P32(o + 4, r);
-    if (!r) { d3d_backend_release(o); bury(o); }
-    RET(c, r, 1);
+static uint32_t release(uint32_t o) {
+    if (!o) return 0;
+    uint32_t *ref = (uint32_t *)(void *)(MEM + o + 4), r = __atomic_load_n(ref, __ATOMIC_RELAXED);
+    do { if (!r) return 0; } while (!__atomic_compare_exchange_n(ref, &r, r-1, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED));
+    if (r == 1) { d3d_backend_release(o); bury(o); }
+    return r-1;
+}
+static void Unk_Release(CPU *c) { RET(c, release(COM_THIS(c)), 1); }
+static void bind_resource(uint32_t *slot, uint32_t o) {
+    uint32_t old = *slot;
+    if (old == o) return;
+    addref(o); *slot = o; release(old);
 }
 static void Res_GetDevice(CPU *c) { uint32_t d = OBJ_DEV(COM_THIS(c)); addref(d); P32(ARG(c, 1), d); RET(c, 0, 2); }
 static void Res_GetPriority(CPU *c) { RET(c, 0, 1); }
@@ -496,12 +500,12 @@ static void Dev_CreateOffscreenPlainSurface(CPU *c) {
 }
 static void Dev_SetRenderTarget(CPU *c) {
     uint32_t i = ARG(c, 1), s = ARG(c, 2);
-    if (i < 4) { if (s) addref(s); g_d3d.rt[i] = s; }
+    if (i < 4) bind_resource(&g_d3d.rt[i], s);
     if (i == 0 && s) { g_d3d.viewport[0] = 0; g_d3d.viewport[1] = 0; g_d3d.viewport[2] = G32(OBJ_F(s, S_W)); g_d3d.viewport[3] = G32(OBJ_F(s, S_H)); }
     RET(c, 0, 3);
 }
 static void Dev_GetRenderTarget(CPU *c) { uint32_t i = ARG(c, 1), s = i < 4 ? g_d3d.rt[i] : 0; addref(s); P32(ARG(c, 2), s); RET(c, s ? 0 : D3DERR_NOTAVAILABLE, 3); }
-static void Dev_SetDepthStencilSurface(CPU *c) { g_d3d.ds = ARG(c, 1); addref(g_d3d.ds); RET(c, 0, 2); }
+static void Dev_SetDepthStencilSurface(CPU *c) { bind_resource(&g_d3d.ds, ARG(c, 1)); RET(c, 0, 2); }
 static void Dev_GetDepthStencilSurface(CPU *c) { addref(g_d3d.ds); P32(ARG(c, 1), g_d3d.ds); RET(c, g_d3d.ds ? 0 : D3DERR_NOTAVAILABLE, 2); }
 static void Dev_BeginScene(CPU *c) { RET(c, 0, 1); }
 static void Dev_EndScene(CPU *c) { RET(c, 0, 1); }
@@ -519,8 +523,9 @@ static void Dev_GetRenderState(CPU *c) { uint32_t s = ARG(c, 1); P32(ARG(c, 2), 
 static void Dev_CreateStateBlock(CPU *c) { P32(ARG(c, 2), newobj(vt_sb, K_SB, COM_THIS(c), 1)); RET(c, 0, 3); }
 static void Dev_EndStateBlock(CPU *c) { P32(ARG(c, 1), newobj(vt_sb, K_SB, COM_THIS(c), 1)); RET(c, 0, 2); }
 static void Dev_SetClipStatus(CPU *c) { RET(c, 0, 2); }
-static void Dev_GetTexture(CPU *c) { uint32_t s = ARG(c, 1), t = s < 32 ? g_d3d.tex[s] : 0; addref(t); P32(ARG(c, 2), t); RET(c, 0, 3); }
-static void Dev_SetTexture(CPU *c) { uint32_t s = ARG(c, 1); if (s >= 257) s = s - 257 + 16; if (s < 32) g_d3d.tex[s] = ARG(c, 2); RET(c, 0, 3); }
+static uint32_t texture_stage(uint32_t s) { return s >= 257 ? s - 257 + 16 : s; }
+static void Dev_GetTexture(CPU *c) { uint32_t s = texture_stage(ARG(c, 1)), t = s < 32 ? g_d3d.tex[s] : 0; addref(t); P32(ARG(c, 2), t); RET(c, 0, 3); }
+static void Dev_SetTexture(CPU *c) { uint32_t s = texture_stage(ARG(c, 1)); if (s < 32) bind_resource(&g_d3d.tex[s], ARG(c, 2)); RET(c, 0, 3); }
 static void Dev_GetTextureStageState(CPU *c) { uint32_t s = ARG(c, 1), t = ARG(c, 2); P32(ARG(c, 3), s < 8 && t < 33 ? g_d3d.tss[s][t] : 0); RET(c, 0, 4); }
 static void Dev_SetTextureStageState(CPU *c) { uint32_t s = ARG(c, 1), t = ARG(c, 2); if (s < 8 && t < 33) g_d3d.tss[s][t] = ARG(c, 3); RET(c, 0, 4); }
 static void Dev_GetSamplerState(CPU *c) { uint32_t s = ARG(c, 1), t = ARG(c, 2); if (s >= 257) s = s - 257 + 16; P32(ARG(c, 3), s < 32 && t < 14 ? g_d3d.ss[s][t] : 0); RET(c, 0, 4); }
@@ -546,9 +551,9 @@ static void Dev_CreateVertexDeclaration(CPU *c) {
     P32(OBJ_F(o, 0), copy); P32(OBJ_F(o, 1), n);
     P32(ARG(c, 2), o); RET(c, 0, 3);
 }
-static void Dev_SetVertexDeclaration(CPU *c) { g_d3d.decl = ARG(c, 1); RET(c, 0, 2); }
+static void Dev_SetVertexDeclaration(CPU *c) { bind_resource(&g_d3d.decl, ARG(c, 1)); RET(c, 0, 2); }
 static void Dev_GetVertexDeclaration(CPU *c) { addref(g_d3d.decl); P32(ARG(c, 1), g_d3d.decl); RET(c, 0, 2); }
-static void Dev_SetFVF(CPU *c) { g_d3d.fvf = ARG(c, 1); g_d3d.decl = 0; RET(c, 0, 2); }
+static void Dev_SetFVF(CPU *c) { g_d3d.fvf = ARG(c, 1); bind_resource(&g_d3d.decl, 0); RET(c, 0, 2); }
 static void Dev_GetFVF(CPU *c) { P32(ARG(c, 1), g_d3d.fvf); RET(c, 0, 2); }
 static void Dev_CreateShader(CPU *c, uint32_t vt, int kind) {
     uint32_t n, code = copy_tokens(ARG(c, 1), &n);
@@ -559,9 +564,9 @@ static void Dev_CreateShader(CPU *c, uint32_t vt, int kind) {
 }
 static void Dev_CreateVertexShader(CPU *c) { Dev_CreateShader(c, vt_vs, K_VS); }
 static void Dev_CreatePixelShader(CPU *c) { Dev_CreateShader(c, vt_ps, K_PS); }
-static void Dev_SetVertexShader(CPU *c) { g_d3d.vs = ARG(c, 1); RET(c, 0, 2); }
+static void Dev_SetVertexShader(CPU *c) { bind_resource(&g_d3d.vs, ARG(c, 1)); RET(c, 0, 2); }
 static void Dev_GetVertexShader(CPU *c) { addref(g_d3d.vs); P32(ARG(c, 1), g_d3d.vs); RET(c, 0, 2); }
-static void Dev_SetPixelShader(CPU *c) { g_d3d.ps = ARG(c, 1); RET(c, 0, 2); }
+static void Dev_SetPixelShader(CPU *c) { bind_resource(&g_d3d.ps, ARG(c, 1)); RET(c, 0, 2); }
 static void Dev_GetPixelShader(CPU *c) { addref(g_d3d.ps); P32(ARG(c, 1), g_d3d.ps); RET(c, 0, 2); }
 static void consts(float (*dst)[4], uint32_t cap, CPU *c, int set) {
     uint32_t start = ARG(c, 1), p = ARG(c, 2), n = ARG(c, 3);
@@ -576,7 +581,7 @@ static void Dev_SetVertexShaderConstantB(CPU *c) { uint32_t s = ARG(c, 1), n = A
 static void Dev_SetPixelShaderConstantB(CPU *c) { uint32_t s = ARG(c, 1), n = ARG(c, 3); for (uint32_t i = 0; i < n && s + i < 16; i++) g_d3d.psb[s + i] = G32(ARG(c, 2) + 4 * i); RET(c, 0, 4); }
 static void Dev_SetVertexShaderConstantI(CPU *c) { uint32_t s = ARG(c, 1), n = ARG(c, 3); if (s + n <= 16) memcpy(g_d3d.vsi[s], MEM + ARG(c, 2), 16 * n); RET(c, 0, 4); }
 static void Dev_SetPixelShaderConstantI(CPU *c) { uint32_t s = ARG(c, 1), n = ARG(c, 3); if (s + n <= 16) memcpy(g_d3d.psi[s], MEM + ARG(c, 2), 16 * n); RET(c, 0, 4); }
-static void Dev_SetStreamSource(CPU *c) { uint32_t s = ARG(c, 1); if (s < 16) { g_d3d.stream[s] = ARG(c, 2); g_d3d.stream_off[s] = ARG(c, 3); g_d3d.stream_stride[s] = ARG(c, 4); } RET(c, 0, 5); }
+static void Dev_SetStreamSource(CPU *c) { uint32_t s = ARG(c, 1); if (s < 16) { bind_resource(&g_d3d.stream[s], ARG(c, 2)); g_d3d.stream_off[s] = ARG(c, 3); g_d3d.stream_stride[s] = ARG(c, 4); } RET(c, 0, 5); }
 static void Dev_GetStreamSource(CPU *c) {
     uint32_t s = ARG(c, 1);
     if (s < 16) { addref(g_d3d.stream[s]); P32(ARG(c, 2), g_d3d.stream[s]); P32(ARG(c, 3), g_d3d.stream_off[s]); P32(ARG(c, 4), g_d3d.stream_stride[s]); }
@@ -584,7 +589,7 @@ static void Dev_GetStreamSource(CPU *c) {
 }
 static void Dev_SetStreamSourceFreq(CPU *c) { uint32_t s = ARG(c, 1); if (s < 16) g_d3d.stream_freq[s] = ARG(c, 2); RET(c, 0, 3); }
 static void Dev_GetStreamSourceFreq(CPU *c) { uint32_t s = ARG(c, 1); P32(ARG(c, 2), s < 16 ? g_d3d.stream_freq[s] : 1); RET(c, 0, 3); }
-static void Dev_SetIndices(CPU *c) { g_d3d.indices = ARG(c, 1); RET(c, 0, 2); }
+static void Dev_SetIndices(CPU *c) { bind_resource(&g_d3d.indices, ARG(c, 1)); RET(c, 0, 2); }
 static void Dev_GetIndices(CPU *c) { addref(g_d3d.indices); P32(ARG(c, 1), g_d3d.indices); RET(c, 0, 2); }
 static void Dev_CreateQuery(CPU *c) {
     uint32_t type = ARG(c, 1), out = ARG(c, 2);
@@ -593,29 +598,48 @@ static void Dev_CreateQuery(CPU *c) {
     P32(out, q); RET(c, 0, 3);
 }
 static void Dev_StretchRect(CPU *c) { d3d_backend_stretch(&g_d3d, ARG(c, 1), ARG(c, 2), ARG(c, 3), ARG(c, 4), ARG(c, 5)); RET(c, 0, 6); }
+static int copy_surface(uint32_t src, uint32_t rect, uint32_t dst, uint32_t point, uint32_t caller) {
+    if (!src || !dst || src == dst || OBJ_KIND(src) != K_SURF || OBJ_KIND(dst) != K_SURF) return 0;
+    uint32_t sw=G32(OBJ_F(src,S_W)),sh=G32(OBJ_F(src,S_H)),dw=G32(OBJ_F(dst,S_W)),dh=G32(OBJ_F(dst,S_H));
+    uint32_t fmt=G32(OBJ_F(src,S_FMT)),sp=G32(OBJ_F(src,S_PITCH)),dp=G32(OBJ_F(dst,S_PITCH));
+    uint32_t x=rect?G32(rect):0,y=rect?G32(rect+4):0,right=rect?G32(rect+8):sw,bottom=rect?G32(rect+12):sh;
+    uint32_t dx=point?G32(point):0,dy=point?G32(point+4):0;
+    if(fmt!=G32(OBJ_F(dst,S_FMT))||x>=right||y>=bottom||right>sw||bottom>sh||dx>dw||dy>dh||right-x>dw-dx||bottom-y>dh-dy)return 0;
+    uint32_t width=right-x,height=bottom-y,block=(uint32_t)d3d_fmt_block(fmt),unit=block?block:(uint32_t)d3d_fmt_bpp(fmt);
+    if(block && ((x|y|dx|dy)&3 || ((right&3)&&right!=sw) || ((bottom&3)&&bottom!=sh) || ((width&3)&&dx+width!=dw) || ((height&3)&&dy+height!=dh)))return 0;
+    uint64_t row_bytes=(uint64_t)(block?(width+3)/4:width)*unit,rows=block?(height+3)/4:height;
+    uint64_t so=(uint64_t)(block?y/4:y)*sp+(uint64_t)(block?x/4:x)*unit;
+    uint64_t to=(uint64_t)(block?dy/4:dy)*dp+(uint64_t)(block?dx/4:dx)*unit;
+    if(row_bytes>sp||row_bytes>dp)return 0;
+    uint32_t a=surf_pin(src),b=surf_pin(dst);
+    uint64_t se=so+(rows-1)*sp+row_bytes,de=to+(rows-1)*dp+row_bytes;
+    int ok=se<=gsize(a)&&de<=gsize(b);
+    if(ok)for(uint64_t row=0;row<rows;row++)memcpy(MEM+b+to+row*dp,MEM+a+so+row*sp,(size_t)row_bytes);
+    else fprintf(stderr,"[d3d-copy] storage bounds failure src=%#x dst=%#x fmt=%#x read=%llu/%u write=%llu/%u caller=%#x\n",src,dst,fmt,(unsigned long long)se,gsize(a),(unsigned long long)de,gsize(b),caller);
+    static unsigned traced;
+    if(ok && block && __atomic_fetch_add(&traced,1,__ATOMIC_RELAXED)<16)
+        fprintf(stderr,"[d3d-copy] compressed fmt=%#x %ux%u rows=%llu row_bytes=%llu src=%#x dst=%#x caller=%#x\n",fmt,width,height,(unsigned long long)rows,(unsigned long long)row_bytes,src,dst,caller);
+    surf_unpin(src);surf_unpin(dst);if(ok)d3d_backend_dirty(dst);return ok;
+}
 static void Dev_UpdateSurface(CPU *c) {
-    uint32_t src = ARG(c, 1), dst = ARG(c, 3);
-    uint32_t n = G32(OBJ_F(src, S_PITCH)) * G32(OBJ_F(src, S_H)), m = G32(OBJ_F(dst, S_PITCH)) * G32(OBJ_F(dst, S_H));
-    if (!ARG(c, 2) && !ARG(c, 4) && n == m) {
-        uint32_t a = surf_pin(src), b = surf_pin(dst);
-        memcpy(MEM + b, MEM + a, n);
-        surf_unpin(src); surf_unpin(dst); d3d_backend_dirty(dst);
-    }
-    RET(c, 0, 5);
+    int ok=copy_surface(ARG(c,1),ARG(c,2),ARG(c,3),ARG(c,4),G32(REG(c,R_ESP)));
+    RET(c,ok?0:D3DERR_INVALIDCALL,5);
 }
 static void Dev_UpdateTexture(CPU *c) {
     uint32_t src = ARG(c, 1), dst = ARG(c, 2);
-    uint32_t lv = G32(OBJ_F(src, T_LEVELS)) < G32(OBJ_F(dst, T_LEVELS)) ? G32(OBJ_F(src, T_LEVELS)) : G32(OBJ_F(dst, T_LEVELS));
+    if(!src||!dst||src==dst||OBJ_KIND(src)!=OBJ_KIND(dst)||
+       (OBJ_KIND(src)!=K_TEX&&OBJ_KIND(src)!=K_CUBE)||G32(OBJ_F(src,T_FMT))!=G32(OBJ_F(dst,T_FMT))){RET(c,D3DERR_INVALIDCALL,3);return;}
+    uint32_t sl=G32(OBJ_F(src,T_LEVELS)),lv=G32(OBJ_F(dst,T_LEVELS));
+    if(sl<lv||!lv||sl>32||G32(OBJ_F(src,T_FACES))!=G32(OBJ_F(dst,T_FACES))){RET(c,D3DERR_INVALIDCALL,3);return;}
+    uint32_t skip=sl-lv;
+    // Match the bottom mip chains. Validate every level before making any writes.
     for (uint32_t f = 0; f < G32(OBJ_F(src, T_FACES)); f++)
         for (uint32_t l = 0; l < lv; l++) {
-            uint32_t a = tex_surf(src, f, l), b = tex_surf(dst, f, l);
-            uint32_t n = G32(OBJ_F(a, S_PITCH)) * G32(OBJ_F(a, S_H)), m = G32(OBJ_F(b, S_PITCH)) * G32(OBJ_F(b, S_H));
-            if (n == m) {
-                uint32_t pa = surf_pin(a), pb = surf_pin(b);
-                memcpy(MEM + pb, MEM + pa, n);
-                surf_unpin(a); surf_unpin(b); d3d_backend_dirty(b);
-            }
+            uint32_t a=tex_surf(src,f,l+skip),b=tex_surf(dst,f,l);
+            if(!a||!b||G32(OBJ_F(a,S_W))!=G32(OBJ_F(b,S_W))||G32(OBJ_F(a,S_H))!=G32(OBJ_F(b,S_H))){RET(c,D3DERR_INVALIDCALL,3);return;}
         }
+    for(uint32_t f=0;f<G32(OBJ_F(src,T_FACES));f++)for(uint32_t l=0;l<lv;l++)
+        if(!copy_surface(tex_surf(src,f,l+skip),0,tex_surf(dst,f,l),0,G32(REG(c,R_ESP)))){RET(c,D3DERR_INVALIDCALL,3);return;}
     RET(c, 0, 3);
 }
 static void Dev_GetRenderTargetData(CPU *c) { d3d_backend_readback(&g_d3d, ARG(c, 1), ARG(c, 2)); RET(c, 0, 3); }
@@ -755,7 +779,7 @@ static void D3D_CreateDevice(CPU *c) {
     g_d3d.backbuffer = new_surface(dev, g_d3d.width, g_d3d.height, G32(pp + 8) ? G32(pp + 8) : 21, 1, 0, G32(pp + 16), 0, 0, 0);
     g_d3d.swapchain = newobj(vt_swap, K_SWAP, dev, 0);
     if (G32(pp + 40)) g_d3d.ds = new_surface(dev, g_d3d.width, g_d3d.height, G32(pp + 44), 2, 0, G32(pp + 16), 0, 0, 0);  // auto depth
-    g_d3d.rt[0] = g_d3d.backbuffer;
+    bind_resource(&g_d3d.rt[0], g_d3d.backbuffer);
     g_d3d.viewport[2] = g_d3d.width; g_d3d.viewport[3] = g_d3d.height; { float one = 1.0f; memcpy(&g_d3d.viewport[5], &one, 4); }
     for (int s = 0; s < 16; s++) g_d3d.stream_freq[s] = 1;
     fprintf(stderr, "[d3d9] CreateDevice %ux%u fmt %u windowed=%u msaa=%u -> %#x\n", g_d3d.width, g_d3d.height, G32(pp + 8), G32(pp + 32), G32(pp + 16), dev);

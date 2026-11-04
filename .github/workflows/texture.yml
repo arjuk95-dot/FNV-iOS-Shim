@@ -15,4 +15,6 @@ jobs:
       - run: python3 tests/texture_residency_test.py
       - run: python3 tests/texture_lifetime_test.py --reference
       - run: python3 tests/texture_copy_test.py --reference
+      - run: python3 tests/texture_lifetime_test.py
+      - run: python3 tests/texture_copy_test.py
       - run: python3 tools/build.py host-check
