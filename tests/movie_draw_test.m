@@ -119,8 +119,10 @@ static NSData *draw_frame(uint32_t left,uint32_t right){
 }
 static int near_color(NSData *data,unsigned x,unsigned y,uint32_t color){
     const uint8_t *p=(const uint8_t *)data.bytes+4*(y*TEST_W+x);
-    for(unsigned c=0;c<3;c++)if(abs((int)p[c]-(int)((color>>(8*c))&255))>8)return 0;
-    return p[3]>=247;
+    int ok=p[3]>=247;
+    for(unsigned c=0;c<3;c++)if(abs((int)p[c]-(int)((color>>(8*c))&255))>8)ok=0;
+    if(!ok&&color)fprintf(stderr,"pixel %u,%u BGRA=%u,%u,%u,%u expected=%08x\n",x,y,p[0],p[1],p[2],p[3],color);
+    return ok;
 }
 static int black_image(NSData *data){
     const uint8_t *p=data.bytes;for(unsigned i=0;i<TEST_W*TEST_H;i++)if(p[4*i]||p[4*i+1]||p[4*i+2])return 0;return 1;
@@ -151,6 +153,8 @@ int main(void){@autoreleasepool{
     }
     MEM=fnv_reserve_guest();assert(MEM!=MAP_FAILED);test_stack=gmalloc(256);create_device();
     uint32_t left=create_texture(0),right=create_texture(1);uint64_t skipped_before=ff_skipped;
+    HTex *source=host_tex(left);
+    fprintf(stderr,"movie source texture=%p view=%p format=%u GPUformat=%lu\n",(__bridge void*)source.tex,(__bridge void*)source.view,source.fmt,(unsigned long)source.tex.pixelFormat);
     NSData *first=draw_frame(left,right);
 #ifdef FNV_MOVIE_REFERENCE
     check("historical original movie sequence produces only the black clear",black_image(first));
