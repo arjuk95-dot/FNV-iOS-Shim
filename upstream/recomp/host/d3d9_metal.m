@@ -473,6 +473,7 @@ static uint32_t last_vs_off, last_ps_off, last_vs_n, last_ps_n, last_ring_for_co
 static int screen_fvf(D3DState *s) {
     uint32_t color=s->tss[0][1], alpha=s->tss[0][4];
     return !s->vs && !s->ps && !s->decl && s->fvf==0x104 && s->stream_stride[0]>=24 &&
+        s->tex[0] && OBJ_KIND(s->tex[0])==K_TEX &&
         (color==2 || (color==4 && s->tss[0][3]<=1)) && s->tss[0][2]==2 &&
         (alpha==2 || (alpha==4 && s->tss[0][6]<=1)) && s->tss[0][5]==2 &&
         s->tss[1][1]<=1;
@@ -493,10 +494,11 @@ static id<MTLFunction> screen_function(int pixel) {
         NSString *source=@"#include <metal_stdlib>\nusing namespace metal;\n"
             "struct In { float4 p [[attribute(0)]]; float2 uv [[attribute(1)]]; };\n"
             "struct Out { float4 p [[position]]; float2 uv; };\n"
+            "struct ScreenSys { uint alpha_func; float alpha_ref; uint fog_mode,fog_enable; float4 fog_color,fog_params; uint fog_table,opaque,p1,p2; };\n"
             "vertex Out screen_v(In v [[stage_in]], constant float4 &vp [[buffer(23)]]) {\n"
             " float w=1.0/v.p.w; float2 q=(v.p.xy-vp.xy+0.5)/vp.zw;\n"
             " Out o; o.p=float4((q*float2(2,-2)+float2(-1,1))*w,v.p.z*w,w); o.uv=v.uv; return o; }\n"
-            "fragment float4 screen_p(Out v [[stage_in]], texture2d<float> t [[texture(0)]], sampler s [[sampler(0)]]) { return t.sample(s,v.uv); }\n";
+            "fragment float4 screen_p(Out v [[stage_in]], texture2d<float> t [[texture(0)]], sampler s [[sampler(0)]], constant ScreenSys &u [[buffer(3)]]) { float4 c=t.sample(s,v.uv); if(u.opaque)c.a=1; return c; }\n";
         NSError *error=nil;
         library=[dev newLibraryWithSource:source options:copts error:&error];
         if(!library)fprintf(stderr,"[metal] screen FVF shader failed: %s\n",error.localizedDescription.UTF8String);
@@ -681,7 +683,10 @@ static int setup_draw(D3DState *s) {
     uint32_t fc = s->rs[34];
     psys.fog_color[0] = ((fc >> 16) & 255) / 255.0f; psys.fog_color[1] = ((fc >> 8) & 255) / 255.0f; psys.fog_color[2] = (fc & 255) / 255.0f; psys.fog_color[3] = 1;
     memcpy(&psys.fog_params[0], &s->rs[36], 4); memcpy(&psys.fog_params[1], &s->rs[37], 4); memcpy(&psys.fog_params[2], &s->rs[38], 4); psys.fog_params[3] = 0;
-    psys.p0 = psys.p1 = psys.p2 = 0;
+    // XRGB has no alpha channel. The paravirtual GPU samples its unused byte
+    // despite an alpha-one texture view; enforce the D3D format in this shader.
+    psys.p0 = screen && (G32(OBJ_F(s->tex[0],T_FMT))==22 || G32(OBJ_F(s->tex[0],T_FMT))==33);
+    psys.p1 = psys.p2 = 0;
     _Static_assert(sizeof psys <= 256, "psys");
     ec_fbytes(&psys, sizeof psys, 3);
 
