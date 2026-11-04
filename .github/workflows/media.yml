@@ -6,7 +6,7 @@ on:
         description: Standard macOS runner image
         type: choice
         default: macos-15
-        options: [macos-15, macos-26, macos-26-intel]
+        options: [macos-15, macos-26, macos-15-intel, macos-26-intel]
 permissions:
   contents: read
   actions: read
@@ -21,7 +21,7 @@ jobs:
       - run: python3 tests/mmio_ioproc_test.py --reference
       - run: python3 tests/mmio_ioproc_test.py
   media:
-    if: ${{ inputs.runner != 'macos-26-intel' }}
+    if: ${{ !endsWith(inputs.runner, '-intel') }}
     runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 15
     env:
@@ -51,5 +51,7 @@ jobs:
       - run: python3 tools/build.py host-check --codec-prefix build/codecs-ios
       - run: python3 tools/startup_build.py --host-check --out build/startup
   media-repairs-intel:
-    if: ${{ inputs.runner == 'macos-26-intel' }}
+    if: ${{ endsWith(inputs.runner, '-intel') }}
     uses: ./.github/workflows/media-repair.yml
+    with:
+      runner: ${{ inputs.runner }}
