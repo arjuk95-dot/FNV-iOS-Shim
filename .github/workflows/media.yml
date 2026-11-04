@@ -17,6 +17,8 @@ jobs:
       - run: python3 tests/audio_shims_test.py
       - run: python3 tests/dsound_lifetime_test.py --reference
       - run: python3 tests/dsound_lifetime_test.py
+      - run: python3 tests/dshow_source_test.py --reference
+      - run: python3 tests/dshow_source_test.py
       - run: gh run download 41685697032 --repo "$GITHUB_REPOSITORY" --name FNV-public-codecs-macos --dir build/codecs-macos
       - run: python3 tests/vorbis_bridge_test.py build/codecs-macos
       - run: python3 tests/bink_shims_test.py

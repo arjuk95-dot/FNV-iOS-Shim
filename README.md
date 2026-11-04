@@ -62,7 +62,9 @@ Keep executable-specific addresses and exported code outside this repository.
 
 On a Mac, `python3 tests/file_shims_case_test.py` exercises real file APIs on a case-sensitive APFS fixture. `python3 tests/sync_shims_test.py` compares actual pthread/wait behavior against the recorded pre-repair module, including wait-all signal consumption, explicit thread completion, suspended creation/resume, timeout boundaries and diagnostic snapshots. Neither test supplies original game assets or establishes gameplay success.
 
-The media workflow runs actual PCM/DirectSound ABI, native Vorbis guest callbacks, Bink ABI, authored H264 pixel decoding and hybrid input/display checks, then compiles the public iPhoneOS host and links the macOS host. Media fixtures are authored test data. Speaker playback and touch quality require the phone.
+The media workflow runs actual PCM/DirectSound ABI, native Vorbis guest callbacks, DirectShow pull-source playback, Bink ABI, authored H264 pixel decoding and hybrid input/display checks, then compiles the public iPhoneOS host and links the macOS host. Media fixtures are authored test data. Speaker playback and touch quality require the phone.
+
+DirectShow supports both native file playback and the game's custom source-filter path. `AddFilter` retains the guest source; `Render(IPin)` reads its standard `IAsyncReader` interface with the original 32-bit COM calling convention and decodes the resulting audio natively. Callback CPU and exception-list state are restored, and the final graph release drops its retained sources. The regression runs the actual graph against an authored pull reader and compares it with the historical success-only filter methods.
 
 `python3 tests/display_preferences_test.py --reference` exercises the historical preference initializer against the actual Direct3D adapter identifier and Win32 profile reader, asserting the missing/stale identity failures. Without `--reference`, the same integration checks exercise the current initializer and verify unrelated settings, native aspect and repeated-launch stability.
 

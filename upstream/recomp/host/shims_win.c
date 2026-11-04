@@ -138,9 +138,18 @@ SHIM(CoTaskMemAlloc) { RET(c, gmalloc(ARG(c, 0)), 1); }
 SHIM(CoTaskMemFree) { gfree(ARG(c, 0)); RET(c, 0, 1); }
 uint32_t dshow_create_filtergraph(uint32_t iid);
 SHIM(CoCreateInstance) {
-    if (G32(ARG(c, 0)) == 0xe436ebb3u) {            // CLSID_FilterGraph: DirectShow music player
-        P32(ARG(c, 4), dshow_create_filtergraph(ARG(c, 3)));
-        RET(c, 0, 5); return;
+    static const uint8_t filter_graph[16] = {
+        0xb3,0xeb,0x36,0xe4,0x4f,0x52,0xce,0x11,0x9f,0x53,0x00,0x20,0xaf,0x0b,0xa7,0x70
+    };
+    uint32_t clsid=ARG(c,0),out=ARG(c,4);
+    if(!out){RET(c,0x80004003u,5);return;}
+    P32(out,0);
+    if(!clsid||!ARG(c,3)){RET(c,0x80004003u,5);return;}
+    if (clsid && !memcmp(MEM+clsid,filter_graph,sizeof filter_graph)) {
+        if(ARG(c,1)){RET(c,0x80040110u,5);return;}
+        uint32_t object=dshow_create_filtergraph(ARG(c,3));
+        P32(out,object);
+        RET(c,object?0:0x80004002u,5);return;
     }
     uint32_t g = ARG(c, 0), ig = ARG(c, 3);
     fprintf(stderr, "[host] CoCreateInstance clsid {%08x-%04x-%04x-...} iid {%08x-...} -> REGDB_E_CLASSNOTREG\n",
