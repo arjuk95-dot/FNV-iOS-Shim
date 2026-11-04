@@ -1,0 +1,36 @@
+name: Check media repairs on Intel fallback
+on: workflow_dispatch
+permissions:
+  contents: read
+  actions: read
+jobs:
+  media-repairs:
+    # Standard Intel capacity is independent of the unavailable ARM64 pool.
+    # Native codec ARM64 regressions remain in media.yml; the iPhone compilation
+    # below still targets ARM64 and validates the existing pinned iOS codecs.
+    runs-on: macos-26-intel
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: bash tests/run.sh
+      - run: python3 tests/audio_shims_test.py
+      - run: python3 tests/dsound_lifetime_test.py --reference
+      - run: python3 tests/dsound_lifetime_test.py
+      - run: python3 tests/dshow_source_test.py --reference
+      - run: python3 tests/dshow_source_test.py
+      - run: python3 tests/mmio_ioproc_test.py --reference
+      - run: python3 tests/mmio_ioproc_test.py
+      - run: python3 tests/bink_shims_test.py
+      - run: python3 tests/native_video_test.py
+      - run: python3 tests/movie_draw_test.py --reference
+      - run: python3 tests/movie_draw_test.py
+      - run: python3 tests/input_display_test.py
+      - run: python3 tests/guest_diagnostics_test.py
+      - run: python3 tests/display_preferences_test.py --reference
+      - run: python3 tests/display_preferences_test.py
+      - run: gh run download 41685697032 --repo "$GITHUB_REPOSITORY" --name FNV-public-codecs-ios --dir build/codecs-ios
+      - run: python3 tools/build.py host-check --codec-prefix build/codecs-ios

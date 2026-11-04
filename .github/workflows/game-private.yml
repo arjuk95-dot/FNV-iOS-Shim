@@ -3,10 +3,10 @@ on:
   workflow_dispatch:
     inputs:
       runner:
-        description: Standard ARM64 macOS runner image
+        description: Standard macOS build runner (IPA target remains ARM64)
         type: choice
         default: macos-15
-        options: [macos-15, macos-26]
+        options: [macos-15, macos-26, macos-26-intel]
       input_tag:
         description: Private temporary release tag approved by the owner
         required: true
