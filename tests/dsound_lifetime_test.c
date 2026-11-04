@@ -1,6 +1,9 @@
 // Windows SDK IIDs and the original game's base-first Release-until-zero order.
 #include "FNVGuestMemory.h"
-#include "../upstream/recomp/host/gheap.c"
+#ifndef FNV_GHEAP_SOURCE
+#define FNV_GHEAP_SOURCE "../upstream/recomp/host/gheap.c"
+#endif
+#include FNV_GHEAP_SOURCE
 #ifndef FNV_DSOUND_SOURCE
 #define FNV_DSOUND_SOURCE "../upstream/recomp/host/dsound.c"
 #endif
@@ -13,7 +16,7 @@ static const uint8_t sdk_3d[16]={0x86,0xfa,0x9a,0x27,0x81,0x49,0xce,0x11,0xa5,0x
 static const uint8_t sdk_listener[16]={0x84,0xfa,0x9a,0x27,0x81,0x49,0xce,0x11,0xa5,0x21,0,0x20,0xaf,0x0b,0xe5,0x60};
 static const uint8_t sdk_base[16]={0x85,0xfa,0x9a,0x27,0x81,0x49,0xce,0x11,0xa5,0x21,0,0x20,0xaf,0x0b,0xe5,0x60};
 static uint32_t stack,output,iid,ds;
-static uint32_t invoke(ShimFn fn,uint32_t *args,unsigned n){CPU c={0};SETREG(&c,R_ESP,stack);P32(stack,0xaeb047);for(unsigned i=0;i<n;i++)P32(stack+4+4*i,args[i]);fn(&c);assert(REG(&c,R_ESP)==stack+4+4*n);return REG(&c,R_EAX);}
+static uint32_t invoke(ShimFn fn,uint32_t *args,unsigned n){CPU c={0};SETREG(&c,R_ESP,stack);P32(stack,0xaeb047);for(unsigned i=0;i<n;i++)P32(stack+4+4*i,args[i]);fn(&c);if(REG(&c,R_ESP)!=stack+4+4*n)fprintf(stderr,"ABI stack imbalance: actual=%#x expected=%#x delta=%d\n",REG(&c,R_ESP),stack+4+4*n,(int)(REG(&c,R_ESP)-(stack+4+4*n)));assert(REG(&c,R_ESP)==stack+4+4*n);return REG(&c,R_EAX);}
 static uint32_t method(uint32_t o,unsigned slot,uint32_t *args,unsigned n){uint32_t thunk=G32(G32(o)+4*slot);assert(thunk>=IMPORT_THUNK_BASE&&(thunk-IMPORT_THUNK_BASE)/4<(uint32_t)host_import_count);return invoke(host_imports[(thunk-IMPORT_THUNK_BASE)/4].fn,args,n);}
 #define CALL(o,slot,...) method(o,slot,(uint32_t[]){__VA_ARGS__},sizeof((uint32_t[]){__VA_ARGS__})/4)
 static uint32_t make_buffer(int primary){
@@ -31,6 +34,14 @@ int main(int argc,char **argv){
         assert(query(b,sdk_3d,&s)==0);printf("base=%#x spatial=%#x alias=%d\n",b,s,b==s);fflush(stdout);
         // Exact order from aeafb0: drain base interface, then the separately stored 3D interface.
         drain(b);drain(s);
+#ifdef FNV_OLD_HEAP
+        // With the original unguarded allocator, the same audio double free hands
+        // the texture/surface size class out twice to separate live allocations.
+        uint32_t texture_sized=gmalloc(60),surface_sized=gmalloc(76);
+        printf("AUDIO-TO-GRAPHICS ALIAS: texture_sized=%#x surface_sized=%#x\n",texture_sized,surface_sized);
+        assert(texture_sized==surface_sized);return 0;
+#endif
+#ifndef FNV_OLD_HEAP
     }else if(!strcmp(mode,"sdk-min-distance-abi")){
         assert(query(b,sdk_3d,&s)==0);
         // af1029 calls 3D slot17 with float distance and dwApply. The old alias
@@ -53,6 +64,7 @@ int main(int argc,char **argv){
         drain(b);drain(s);assert(allocation_find(data,0)->live);
         CALL(duplicate,12,duplicate,0,0,0);float l[4],r[4];fnv_audio_mix(l,r,4,48000);
         drain(duplicate);drain(other);assert(!allocation_find(data,0)->live);
+#endif
     }else return 2;
     printf("PASS: %s\n",mode);return 0;
 }

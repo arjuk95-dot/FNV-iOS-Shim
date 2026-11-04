@@ -14,5 +14,12 @@ with tempfile.TemporaryDirectory() as folder:
         print(result.stdout,end='');print(result.stderr,end='')
         if result.returncode:failures.append(mode)
         if args.reference and mode=='sdk-destructor':assert 'reason=freed-pointer' in result.stderr and 'alias=1' in result.stdout
-    if args.reference:assert len(failures)==7,failures;print('Historical SDK IID/interface lifetime failures reproduced:',len(failures))
+    if args.reference:
+        assert len(failures)==7,failures;print('Historical SDK IID/interface lifetime failures reproduced:',len(failures))
+        old_heap=work/'gheap.c';old_heap.write_bytes(subprocess.check_output(['git','show','499fa3d:upstream/recomp/host/gheap.c'],cwd=root))
+        alias=work/'sound-graphics-alias'
+        subprocess.run(['xcrun','clang','-O1','-I',str(root/'ios'),'-I',str(host),'-I',str(root/'upstream/recomp'),*flags,'-DFNV_OLD_HEAP','-DFNV_GHEAP_SOURCE="'+str(old_heap)+'"',
+            str(root/'tests/dsound_lifetime_test.c'),str(root/'ios/FNVAudioMixer.c'),str(host/'com.c'),'-o',str(alias)],check=True)
+        result=subprocess.run([str(alias),'sdk-destructor'],capture_output=True,text=True,timeout=20)
+        print(result.stdout,end='');assert result.returncode==0 and 'AUDIO-TO-GRAPHICS ALIAS:' in result.stdout,(result.returncode,result.stderr)
     else:assert not failures,failures
