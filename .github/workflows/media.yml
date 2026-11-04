@@ -3,10 +3,10 @@ on:
   workflow_dispatch:
     inputs:
       runner:
-        description: Standard ARM64 macOS runner image
+        description: Standard macOS runner image
         type: choice
         default: macos-15
-        options: [macos-15, macos-26]
+        options: [macos-15, macos-26, macos-26-intel]
 permissions:
   contents: read
   actions: read
@@ -21,6 +21,7 @@ jobs:
       - run: python3 tests/mmio_ioproc_test.py --reference
       - run: python3 tests/mmio_ioproc_test.py
   media:
+    if: ${{ inputs.runner != 'macos-26-intel' }}
     runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 15
     env:
@@ -49,3 +50,6 @@ jobs:
       - run: gh run download 41685697032 --repo "$GITHUB_REPOSITORY" --name FNV-public-codecs-ios --dir build/codecs-ios
       - run: python3 tools/build.py host-check --codec-prefix build/codecs-ios
       - run: python3 tools/startup_build.py --host-check --out build/startup
+  media-repairs-intel:
+    if: ${{ inputs.runner == 'macos-26-intel' }}
+    uses: ./.github/workflows/media-repair.yml
