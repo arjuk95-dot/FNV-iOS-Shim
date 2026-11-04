@@ -95,7 +95,7 @@ def main():
             if codec:flags+=['-DFNV_HAVE_VORBIS','-I',str(codec/'include')]
             if source.suffix=='.m': flags.append('-fobjc-arc')
             if probe: flags.append('-DFNV_PROBE')
-            elif not host_check: flags.append('-DRT_CALLTRACE')
+            elif not host_check: flags+=['-DRT_CALLTRACE','-DFNV_GAME_INPUT_CONTEXT']
             key=hashlib.sha256(config+json.dumps(base+flags).encode()+source.name.encode()+content).hexdigest()
             stored=args.cache/(key+'.o') if args.cache else None
             if stored and stored.exists() and digest(stored)==old_manifest.get(stored.name):return str(stored),True
@@ -113,7 +113,7 @@ def main():
         if host_check:
             print(f'PASS: compiled {len(objects)} public game-host sources for arm64 iPhoneOS; no game inputs or IPA')
             return
-        frameworks=['Foundation','UIKit','Metal','QuartzCore','CoreGraphics','AVFoundation','CoreVideo','CoreMedia','ImageIO','UniformTypeIdentifiers']
+        frameworks=['Foundation','UIKit','Metal','QuartzCore','CoreGraphics','AVFoundation','CoreVideo','CoreMedia','ImageIO','UniformTypeIdentifiers','CoreMotion','GameController']
         libraries=[str(codec/'lib'/('lib'+n+'.a')) for n in ['vorbisfile','vorbis','ogg']] if codec else []
         run(base+objects+libraries+[v for f in frameworks for v in ('-framework',f)]+['-o',str(app/name)])
         if codec:shutil.copytree(codec/'licenses',app/'Licenses')
@@ -122,6 +122,8 @@ def main():
                   CFBundleShortVersionString='0.1',CFBundleInfoDictionaryVersion='6.0',MinimumOSVersion='18.0',
                   CFBundleSupportedPlatforms=['iPhoneOS'],UIDeviceFamily=[1,2],LSRequiresIPhoneOS=True,
                   UIFileSharingEnabled=True,LSSupportsOpeningDocumentsInPlace=True,UILaunchScreen={},
+                  NSMotionUsageDescription='Optional gyroscope controls let you aim by moving your iPhone.',
+                  GCSupportedGameControllers=[{'ProfileName':'ExtendedGamepad'}],
                   UISupportedInterfaceOrientations=['UIInterfaceOrientationLandscapeLeft','UIInterfaceOrientationLandscapeRight'])
         if not probe: info['FNVExecutableSHA256']=digest(args.exe)
         info['FNVHybridCameraSites']=[hex(site) for site in sorted(hybrid)]
