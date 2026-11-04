@@ -40,7 +40,7 @@ static uint32_t hugelist;            // freed huge blocks: [size:4][-1:4][next:4
 typedef struct {uint32_t q,size,capacity,kind,live;uint64_t serial;} Allocation;
 static Allocation *ownership;static size_t ownership_cap,ownership_used;static uint64_t allocation_serial;
 #if defined(__GNUC__)
-extern void host_heap_fault(const char *,uint32_t,uint32_t,uint32_t) __attribute__((weak));
+__attribute__((weak)) void host_heap_fault(const char *why,uint32_t q,uint32_t expected,uint32_t actual){(void)why;(void)q;(void)expected;(void)actual;}
 #endif
 static void heap_fault(const char *why,uint32_t q,uint32_t expected,uint32_t actual){
     fprintf(stderr,"[heap-corruption] reason=%s guest=%#x expected=%#x actual=%#x serial=%llu\n",why,q,expected,actual,(unsigned long long)allocation_serial);
