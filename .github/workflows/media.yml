@@ -39,7 +39,7 @@ jobs:
       - run: python3 tests/dsound_lifetime_test.py
       - run: python3 tests/dshow_source_test.py --reference
       - run: python3 tests/dshow_source_test.py
-      - run: gh run download 41685697032 --repo "$GITHUB_REPOSITORY" --name FNV-public-codecs-macos --dir build/codecs-macos
+      - run: python3 tools/fetch_codecs.py macos --out build/codecs-macos
       - run: python3 tests/vorbis_bridge_test.py build/codecs-macos
       - run: python3 tests/bink_shims_test.py
       - run: python3 tests/native_video_test.py
@@ -51,7 +51,7 @@ jobs:
       - run: python3 tests/touch_settings_test.py
       - run: python3 tests/display_preferences_test.py --reference
       - run: python3 tests/display_preferences_test.py
-      - run: gh run download 41685697032 --repo "$GITHUB_REPOSITORY" --name FNV-public-codecs-ios --dir build/codecs-ios
+      - run: python3 tools/fetch_codecs.py ios --out build/codecs-ios
       - run: python3 tools/build.py host-check --codec-prefix build/codecs-ios
       - run: python3 tools/startup_build.py --host-check --out build/startup
   media-repairs-intel:

@@ -67,7 +67,7 @@ jobs:
       - name: Compile and link translated game
         run: |
           case "$CODECS_RUN_ID" in ''|*[!0-9]*) exit 1;; esac
-          gh run download "$CODECS_RUN_ID" --repo "$GITHUB_REPOSITORY" --name FNV-public-codecs-ios --dir build/codecs-ios
+          python3 tools/fetch_codecs.py ios --run "$CODECS_RUN_ID" --out build/codecs-ios
           if [ -n "$CACHE_RUN_ID" ]; then
             case "$CACHE_RUN_ID" in *[!0-9]*) exit 1;; esac
             gh run download "$CACHE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name FNV-ios-objects-private --dir build/ios-objects
