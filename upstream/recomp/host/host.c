@@ -19,6 +19,12 @@ int64_t rt_budget = INT64_MAX;
 static _Thread_local jmp_buf *trap_jb;
 static _Thread_local int trap_code;
 static _Thread_local uint32_t trap_addr;
+static _Thread_local CPU *import_cpu;
+void host_heap_fault(const char *why,uint32_t address,uint32_t expected,uint32_t actual){
+    (void)why;(void)expected;(void)actual;
+    CPU *c=import_cpu;
+    if(c){uint32_t esp=REG(c,R_ESP);fprintf(stderr,"[heap-context] guest=%#x eip=%#x caller=%#x eax=%#x ecx=%#x edx=%#x edi=%#x\n",address,REG(c,644),esp<=0xfffffffbu?G32(esp):0,REG(c,R_EAX),REG(c,R_ECX),REG(c,R_EDX),REG(c,28));}
+}
 
 void rt_trap(CPU *c, int code, uint32_t addr) {
     (void)c;
@@ -85,7 +91,9 @@ void rt_import_call(CPU *c, uint32_t addr) {
     if (trace < 0) trace = getenv("FNV_TRACE") != NULL;
     if (trace) fprintf(stderr, "[imp] %s!%s(%#x, %#x, %#x, %#x)\n", hi->dll, hi->name,
                        G32(REG(c, R_ESP) + 4), G32(REG(c, R_ESP) + 8), G32(REG(c, R_ESP) + 12), G32(REG(c, R_ESP) + 16));
+    CPU *previous_import=import_cpu;import_cpu=c;
     hi->fn(c);
+    import_cpu=previous_import;
     if (trace) fprintf(stderr, "[imp]   -> %#x\n", REG(c, R_EAX));
 }
 
@@ -182,6 +190,7 @@ int fnv_run_game(int argc, char **argv) {
 int host_run_guest(CPU *c, uint32_t entry) {
     jmp_buf jb;
     jmp_buf *saved = trap_jb;
+    CPU *saved_import=import_cpu;
     trap_jb = &jb;
     if (setjmp(jb)) {
         uint32_t trap_sp=REG(c,16);
@@ -207,10 +216,24 @@ int host_run_guest(CPU *c, uint32_t entry) {
                 fprintf(stderr,"\n");
             }
         }
-        trap_jb = saved;
+        // Register-based indirect COM calls often leave ECX holding a thunk. Inspect
+        // the actual first stdcall argument, not only the ECX register.
+        if(trap_addr==0 && sp<=0xfffffffbu){
+            uint32_t o=G32(sp+4);
+            if(o && o<=0xffffffbfu){
+                fprintf(stderr,"[guest-arg0-object] @%#x",o);
+                for(unsigned i=0;i<16;i++)fprintf(stderr," %#x",G32(o+4*i));
+                uint32_t vt=G32(o);fprintf(stderr,"\n");
+                if(vt && vt<=0xffffff9fu)for(unsigned i=0;i<24;i++){
+                    uint32_t target=G32(vt+4*i),slot=(target-IMPORT_THUNK_BASE)/4;
+                    fprintf(stderr,"[guest-arg0-vtable] +%#x target=%#x %s\n",4*i,target,target>=IMPORT_THUNK_BASE&&slot<(uint32_t)host_import_count?host_imports[slot].name:"");
+                }
+            }
+        }
+        trap_jb = saved;import_cpu=saved_import;
         return trap_code;
     }
     rt_call(c, entry);
-    trap_jb = saved;
+    trap_jb = saved;import_cpu=saved_import;
     return 0;
 }

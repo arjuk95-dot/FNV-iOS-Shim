@@ -8,6 +8,7 @@
 uint32_t d3d9_create_texture(uint32_t dev, int cube, uint32_t w, uint32_t h, uint32_t levels, uint32_t usage, uint32_t fmt, uint32_t pool);
 uint32_t d3d9_texture_level_data(uint32_t tex, uint32_t face, uint32_t level, uint32_t *pitch, uint32_t *size);
 void d3d9_texture_dirty(uint32_t tex);
+void d3d9_texture_check(uint32_t tex,uint32_t caller,const char *stage);
 
 static float *M(uint32_t a) { return (float *)(void *)(MEM + a); }
 static float FARG(CPU *c, int i) { uint32_t b = ARG(c, i); float f; memcpy(&f, &b, 4); return f; }
@@ -150,11 +151,13 @@ static void D3DXGetImageInfoFromFileInMemory_(CPU *c) {
     P32(info + 20, d.cube ? 5 : d.volume ? 4 : 3); P32(info + 24, 4 /* D3DXIFF_DDS */);
     RET(c, 0, 3);
 }
-static uint32_t dds_load(uint32_t dev, uint32_t src, uint32_t n, int want_cube) {
+static uint32_t dds_load(uint32_t dev, uint32_t src, uint32_t n, int want_cube,uint32_t caller) {
     DDSInfo d;
     if (!dds_parse(src, n, &d)) return 0;
     uint32_t faces = want_cube && d.cube ? 6 : 1;
     uint32_t tex = d3d9_create_texture(dev, faces == 6, d.w, d.h, d.mips, 0, d.fmt, 1 /* MANAGED */);
+    static unsigned seen;unsigned sample=__atomic_fetch_add(&seen,1,__ATOMIC_RELAXED);
+    if(sample<64||(sample<4096&&sample%512==0))fprintf(stderr,"[dds-diag] caller=%#x tex=%#x src=%#x bytes=%u w=%u h=%u levels=%u fmt=%#x faces=%u\n",caller,tex,src,n,d.w,d.h,d.mips,d.fmt,faces);
     uint32_t off = src + d.data_off, end = src + n;
     for (uint32_t f = 0; f < faces; f++)
         for (uint32_t l = 0; l < d.mips; l++) {
@@ -162,23 +165,24 @@ static uint32_t dds_load(uint32_t dev, uint32_t src, uint32_t n, int want_cube) 
             if (!dst) continue;
             uint32_t take = off + size <= end ? size : (off < end ? end - off : 0);
             memcpy(MEM + dst, MEM + off, take);
+            d3d9_texture_check(tex,caller,"dds-after-copy");
             off += size;
         }
     d3d9_texture_dirty(tex);
     return tex;
 }
 static void D3DXCreateTextureFromFileInMemory_(CPU *c) {
-    uint32_t t = dds_load(ARG(c, 0), ARG(c, 1), ARG(c, 2), 0);
+    uint32_t t = dds_load(ARG(c, 0), ARG(c, 1), ARG(c, 2), 0,G32(REG(c,R_ESP)));
     if (!t) { fprintf(stderr, "[d3dx] CreateTextureFromFileInMemory: not a DDS this loader understands\n"); RET(c, D3DXERR_INVALIDDATA, 4); return; }
     P32(ARG(c, 3), t); RET(c, 0, 4);
 }
 static void D3DXCreateCubeTextureFromFileInMemory_(CPU *c) {
-    uint32_t t = dds_load(ARG(c, 0), ARG(c, 1), ARG(c, 2), 1);
+    uint32_t t = dds_load(ARG(c, 0), ARG(c, 1), ARG(c, 2), 1,G32(REG(c,R_ESP)));
     if (!t) { RET(c, D3DXERR_INVALIDDATA, 4); return; }
     P32(ARG(c, 3), t); RET(c, 0, 4);
 }
 static void D3DXCreateVolumeTextureFromFileInMemory_(CPU *c) {
-    uint32_t t = dds_load(ARG(c, 0), ARG(c, 1), ARG(c, 2), 0);
+    uint32_t t = dds_load(ARG(c, 0), ARG(c, 1), ARG(c, 2), 0,G32(REG(c,R_ESP)));
     if (!t) { RET(c, D3DXERR_INVALIDDATA, 4); return; }
     P32(ARG(c, 3), t); RET(c, 0, 4);
 }

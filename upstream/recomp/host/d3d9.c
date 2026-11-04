@@ -233,6 +233,7 @@ static const Ov surf_ov[] = {
 // ---- textures (2D, cube) -------------------------------------------------------------------------
 // fields: 0 width, 1 height/edge, 2 levels, 3 format, 4 usage, 5 pool, 6 surfaces array ptr (levels*faces)
 enum { T_W, T_H, T_LEVELS, T_FMT, T_USAGE, T_POOL, T_SURFS, T_FACES, T_LOD, T_DIRTY, T_HOST, T_NF };
+void d3d9_texture_check(uint32_t tex,uint32_t caller,const char *stage);
 static uint32_t new_texture(uint32_t dev, int kind, uint32_t w, uint32_t h, uint32_t levels, uint32_t usage, uint32_t fmt, uint32_t pool) {
     uint32_t faces = kind == K_CUBE ? 6 : 1;
     if (!levels) { levels = 1; uint32_t m = w > h ? w : h; while (m > 1) { m >>= 1; levels++; } }
@@ -249,8 +250,22 @@ static uint32_t new_texture(uint32_t dev, int kind, uint32_t w, uint32_t h, uint
             P32(arr + 4 * (f * levels + l), s);
         }
     P32(OBJ_F(t, T_SURFS), arr);
+    d3d9_texture_check(t,0,"created");
     d3d_backend_created(t);
     return t;
+}
+void d3d9_texture_check(uint32_t t,uint32_t caller,const char *stage){
+    const char *why=NULL;uint32_t bad=t,kind=OBJ_KIND(t),w=G32(OBJ_F(t,T_W)),h=G32(OBJ_F(t,T_H));
+    uint32_t levels=G32(OBJ_F(t,T_LEVELS)),faces=G32(OBJ_F(t,T_FACES)),arr=G32(OBJ_F(t,T_SURFS)),fmt=G32(OBJ_F(t,T_FMT));
+    if(gsize(t)<16+4*T_NF || (kind!=K_TEX&&kind!=K_CUBE)||G32(t)!=(kind==K_CUBE?vt_cube:vt_tex))why="texture-identity";
+    else if(!w||!h||w>8192||h>8192||!levels||levels>14||faces!=(kind==K_CUBE?6u:1u))why="texture-geometry";
+    else if(!arr||gsize(arr)<4*levels*faces)why="surface-array";
+    else for(uint32_t f=0;!why&&f<faces;f++)for(uint32_t l=0;!why&&l<levels;l++){
+        uint32_t s=G32(arr+4*(f*levels+l));bad=s;
+        if(!s||gsize(s)<16+4*S_NF||OBJ_KIND(s)!=K_SURF||G32(s)!=vt_surf||G32(OBJ_F(s,S_CONT))!=t||
+           G32(OBJ_F(s,S_W))!=(w>>l?w>>l:1)||G32(OBJ_F(s,S_H))!=(h>>l?h>>l:1)||G32(OBJ_F(s,S_FMT))!=fmt)why="surface-identity";
+    }
+    if(why){fprintf(stderr,"[resource-corruption] reason=%s stage=%s tex=%#x bad=%#x caller=%#x kind=%u vt=%#x expected_tex_vt=%#x surface_vt=%#x w=%u h=%u levels=%u faces=%u array=%#x fmt=%#x\n",why,stage,t,bad,caller,kind,G32(t),vt_tex,vt_surf,w,h,levels,faces,arr,fmt);fflush(stderr);abort();}
 }
 static uint32_t tex_surf(uint32_t t, uint32_t face, uint32_t level) {
     uint32_t levels = G32(OBJ_F(t, T_LEVELS));
@@ -822,6 +837,7 @@ uint32_t d3d9_texture_level_data(uint32_t tex, uint32_t face, uint32_t level, ui
     return surf_pin(s);                               // unpinned by d3d9_texture_dirty
 }
 void d3d9_texture_dirty(uint32_t tex) {
+    d3d9_texture_check(tex,0,"dirty-before");
     for (uint32_t f = 0; f < G32(OBJ_F(tex, T_FACES)); f++)
         for (uint32_t l = 0; l < G32(OBJ_F(tex, T_LEVELS)); l++) { surf_unpin(tex_surf(tex, f, l)); d3d_backend_dirty(tex_surf(tex, f, l)); }
 }
