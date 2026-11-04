@@ -23,5 +23,9 @@ void rt_diag_watch(CPU *c,uint32_t entry,const uint32_t *offsets,unsigned n) {
         fprintf(stderr,"%#x,",G32(fp+4));uint32_t next=G32(fp);
         if(next<=fp)break;fp=next;
     }
+    if(sp>=lo && sp<=hi && hi-sp>=20){
+        fprintf(stderr," args=");
+        for(unsigned i=0;i<4;i++)fprintf(stderr,"%#x%s",G32(sp+4+4*i),i==3?"":",");
+    }
     fprintf(stderr,"\n");
 }

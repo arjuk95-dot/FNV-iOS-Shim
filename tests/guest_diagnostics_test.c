@@ -12,5 +12,9 @@ int main(void){
     original=c;memcpy(before,MEM,1<<20);
     for(int i=0;i<1024;i++)rt_diag_watch(&c,0x401000,(uint32_t[]){0,8,16},3);
     if(memcmp(&original,&c,sizeof c)||memcmp(before,MEM,1<<20))return 1;
+    SETREG(&c,R_ECX,0xfffffff8u);P32(0x10104,0x1234);P32(0x10108,0x5678);
+    original=c;memcpy(before,MEM,1<<20);
+    rt_diag_watch(&c,0x402000,NULL,0);
+    if(memcmp(&original,&c,sizeof c)||memcmp(before,MEM,1<<20))return 1;
     puts("PASS: selected-entry samples preserve guest registers and memory");return 0;
 }
