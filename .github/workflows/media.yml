@@ -11,6 +11,15 @@ permissions:
   contents: read
   actions: read
 jobs:
+  archive-wav:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 tests/mmio_ioproc_test.py --reference
+      - run: python3 tests/mmio_ioproc_test.py
   media:
     runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 15
@@ -22,6 +31,7 @@ jobs:
           fetch-depth: 0
       - run: bash tests/run.sh
       - run: python3 tests/audio_shims_test.py
+      - run: python3 tests/mmio_ioproc_test.py
       - run: python3 tests/dsound_lifetime_test.py --reference
       - run: python3 tests/dsound_lifetime_test.py
       - run: python3 tests/dshow_source_test.py --reference
