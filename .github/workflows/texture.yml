@@ -1,0 +1,11 @@
+name: Diagnose texture residency
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  texture:
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tests/texture_residency_test.py
