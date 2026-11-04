@@ -2,6 +2,11 @@ name: Build approved private game inputs
 on:
   workflow_dispatch:
     inputs:
+      runner:
+        description: Standard ARM64 macOS runner image
+        type: choice
+        default: macos-15
+        options: [macos-15, macos-26]
       input_tag:
         description: Private temporary release tag approved by the owner
         required: true
@@ -38,7 +43,7 @@ permissions:
   actions: read
 jobs:
   game:
-    runs-on: macos-15
+    runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 45
     env:
       GH_TOKEN: ${{ github.token }}

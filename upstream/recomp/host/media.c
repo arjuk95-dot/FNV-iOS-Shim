@@ -39,13 +39,16 @@ static void BinkClose_(CPU *c) {pthread_mutex_lock(&movie_lock);BinkMovie *m=fin
 static void BinkNextFrame_(CPU *c) {pthread_mutex_lock(&movie_lock);BinkMovie *m=find_movie(ARG(c,0));if(m)P32(m->guest+12,G32(m->guest+12)+1);pthread_mutex_unlock(&movie_lock);RET(c,0,1);}
 static void BinkWait_(CPU *c) {uint32_t wait=0;pthread_mutex_lock(&movie_lock);BinkMovie *m=find_movie(ARG(c,0));if(m){double next=(G32(m->guest+12)-1)*(double)m->divisor/m->rate;wait=m->paused||fnv_video_time(m->native)+0.0001<next;}pthread_mutex_unlock(&movie_lock);RET(c,wait,1);}
 static void BinkPause_(CPU *c) {uint32_t previous=0;pthread_mutex_lock(&movie_lock);BinkMovie *m=find_movie(ARG(c,0));if(m){previous=m->paused;m->paused=!!ARG(c,1);fnv_video_pause(m->native,m->paused);}pthread_mutex_unlock(&movie_lock);RET(c,previous,2);}
-static void BinkDoFrame_(CPU *c) {pthread_mutex_lock(&movie_lock);BinkMovie *m=find_movie(ARG(c,0));if(m){uint32_t frame=G32(m->guest+12);int ok=fnv_video_decode(m->native,frame);P32(m->guest+16,frame);P32(m->guest+28,!ok);}pthread_mutex_unlock(&movie_lock);RET(c,0,1);}
+static void BinkDoFrame_(CPU *c) {pthread_mutex_lock(&movie_lock);BinkMovie *m=find_movie(ARG(c,0));if(m){uint32_t frame=G32(m->guest+12);int ok=fnv_video_decode(m->native,frame);P32(m->guest+16,frame);P32(m->guest+28,!ok);static unsigned reports;if((frame<=2||!ok)&&reports++<8)fprintf(stderr,"[bink] decode guest=%#x frame=%u ok=%d\n",m->guest,frame,ok);}pthread_mutex_unlock(&movie_lock);RET(c,0,1);}
 static void BinkCopyToBufferRect_(CPU *c) {
     uint32_t result=0,destination=ARG(c,1);int pitch=(int32_t)ARG(c,2);uint32_t height=ARG(c,3);
     pthread_mutex_lock(&movie_lock);BinkMovie *m=find_movie(ARG(c,0));
     uint64_t bytes=pitch>0?(uint64_t)(unsigned)pitch*height:UINT64_MAX;
     if(m&&bytes<=128u*1024*1024&&destination<=0xffffffffu-bytes)
         result=fnv_video_copy(m->native,MEM+destination,pitch,height,ARG(c,4),ARG(c,5),ARG(c,6),ARG(c,7),ARG(c,8),ARG(c,9),ARG(c,10)&15);
+    static unsigned good,bad;
+    if((result?good++:bad++)<4)fprintf(stderr,"[bink] copy guest=%#x pitch=%d height=%u dst=%u,%u src=%u,%u size=%ux%u format=%#x ok=%u\n",
+        ARG(c,0),pitch,height,ARG(c,4),ARG(c,5),ARG(c,6),ARG(c,7),ARG(c,8),ARG(c,9),ARG(c,10),result);
     pthread_mutex_unlock(&movie_lock);RET(c,result,11);
 }
 

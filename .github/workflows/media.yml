@@ -1,11 +1,18 @@
 name: Check native media and input
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: Standard ARM64 macOS runner image
+        type: choice
+        default: macos-15
+        options: [macos-15, macos-26]
 permissions:
   contents: read
   actions: read
 jobs:
   media:
-    runs-on: macos-15
+    runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 15
     env:
       GH_TOKEN: ${{ github.token }}
@@ -23,6 +30,8 @@ jobs:
       - run: python3 tests/vorbis_bridge_test.py build/codecs-macos
       - run: python3 tests/bink_shims_test.py
       - run: python3 tests/native_video_test.py
+      - run: python3 tests/movie_draw_test.py --reference
+      - run: python3 tests/movie_draw_test.py
       - run: python3 tests/input_display_test.py
       - run: python3 tests/guest_diagnostics_test.py
       - run: python3 tests/display_preferences_test.py --reference

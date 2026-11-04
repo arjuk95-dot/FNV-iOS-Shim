@@ -450,7 +450,7 @@ static int prim_info(uint32_t prim, uint32_t count, MTLPrimitiveType *pt, uint32
 
 // Everything a pipeline depends on, compared with memcmp.
 typedef struct {
-    uint32_t vs, ps, decl, depth_mask;
+    uint32_t vs, ps, decl, depth_mask, fvf;
     uint32_t stride[8];
     uint32_t rtfmt[4], rtwm[4], dsfmt, samples;
     uint32_t blend_en, src, dst, op, sep, srca, dsta, opa;
@@ -466,6 +466,44 @@ static DssEnt dss_tab[4096];
 static NSMutableArray *dss_keep;
 static uint32_t last_vs_off, last_ps_off, last_vs_n, last_ps_n, last_ring_for_consts = 99;
 
+// The original movie renderer uses SetFVF(XYZRHW | TEX1), null shaders and
+// 24-byte screen-space vertices (EC0280). These vertices bypass vertex processing:
+// https://learn.microsoft.com/en-us/windows/win32/direct3d9/mapping-fvf-codes-to-a-directx-9-declaration
+// Support its single texture stage; retain explicit rejection of other fixed-function layouts.
+static int screen_fvf(D3DState *s) {
+    uint32_t color=s->tss[0][1], alpha=s->tss[0][4];
+    return !s->vs && !s->ps && !s->decl && s->fvf==0x104 && s->stream_stride[0]>=24 &&
+        (color==2 || (color==4 && s->tss[0][3]<=1)) && s->tss[0][2]==2 &&
+        (alpha==2 || (alpha==4 && s->tss[0][6]<=1)) && s->tss[0][5]==2 &&
+        s->tss[1][1]<=1;
+}
+static HShader *screen_shader(int pixel) {
+    static HShader *stages[2];
+    if(!stages[pixel]) {
+        HShader *stage=[HShader new];
+        stage->info.max_const=-1; stage->info.major=3;
+        stage->info.samplers=pixel?1:0;
+        stages[pixel]=stage;
+    }
+    return stages[pixel];
+}
+static id<MTLFunction> screen_function(int pixel) {
+    static id<MTLLibrary> library;
+    if(!library) {
+        NSString *source=@"#include <metal_stdlib>\nusing namespace metal;\n"
+            "struct In { float4 p [[attribute(0)]]; float2 uv [[attribute(1)]]; };\n"
+            "struct Out { float4 p [[position]]; float2 uv; };\n"
+            "vertex Out screen_v(In v [[stage_in]], constant float4 &vp [[buffer(23)]]) {\n"
+            " float w=1.0/v.p.w; float2 q=(v.p.xy-vp.xy+0.5)/vp.zw;\n"
+            " Out o; o.p=float4((q*float2(2,-2)+float2(-1,1))*w,v.p.z*w,w); o.uv=v.uv; return o; }\n"
+            "fragment float4 screen_p(Out v [[stage_in]], texture2d<float> t [[texture(0)]], sampler s [[sampler(0)]]) { return t.sample(s,v.uv); }\n";
+        NSError *error=nil;
+        library=[dev newLibraryWithSource:source options:copts error:&error];
+        if(!library)fprintf(stderr,"[metal] screen FVF shader failed: %s\n",error.localizedDescription.UTF8String);
+    }
+    return [library newFunctionWithName:pixel?@"screen_p":@"screen_v"];
+}
+
 static uint32_t decl_streams(D3DState *s) {
     uint32_t e = G32(OBJ_F(s->decl, 0)), n = G32(OBJ_F(s->decl, 1)), m = 0;
     for (uint32_t i = 0; i < n; i++, e += 8) { uint16_t st; memcpy(&st, MEM + e, 2); if (st == 0xFF) break; if (st < 16) m |= 1u << st; }
@@ -473,11 +511,17 @@ static uint32_t decl_streams(D3DState *s) {
 }
 
 static int setup_draw(D3DState *s) {
-    if (!s->vs || !s->ps) { ff_skipped++; return 0; }
-    if (!s->decl) return 0;
+    int screen=screen_fvf(s);
+    if ((!s->vs || !s->ps) && !screen) {
+        if(ff_skipped++<8)fprintf(stderr,"[metal] unsupported fixed draw fvf=%#x stride=%u vs=%#x ps=%#x color=%u/%u/%u alpha=%u/%u/%u next=%u\n",
+            s->fvf,s->stream_stride[0],s->vs,s->ps,s->tss[0][1],s->tss[0][2],s->tss[0][3],s->tss[0][4],s->tss[0][5],s->tss[0][6],s->tss[1][1]);
+        return 0;
+    }
+    if (!s->decl && !screen) return 0;
     ensure_pass(s);
     PipeKey k; memset(&k, 0, sizeof k);
     k.vs = s->vs; k.ps = s->ps; k.decl = s->decl;
+    k.fvf = screen?s->fvf:0;
     for (int i = 0; i < 16; i++) {
         uint32_t t = s->tex[i];
         if (t && OBJ_KIND(t) == K_TEX && is_depth_fmt(G32(OBJ_F(t, T_FMT)))) k.depth_mask |= 1u << i;
@@ -502,7 +546,7 @@ static int setup_draw(D3DState *s) {
         if (!memcmp(&e->k, &k, sizeof k)) { pe = e; break; }
     }
     if (!pe) return 0;
-    __unsafe_unretained HShader *vs = host_shader(s->vs), *ps = host_shader(s->ps);
+    __unsafe_unretained HShader *vs = screen?screen_shader(0):host_shader(s->vs), *ps = screen?screen_shader(1):host_shader(s->ps);
     if (!vs || !ps) return 0;
     if (!pe->pso) {
         // miss: link the stages, translate/compile, describe vertices, build the pipeline
@@ -512,12 +556,18 @@ static int setup_draw(D3DState *s) {
             for (int j = 0; j < vs->info.n_io; j++) if (vs->info.io_keys[j] == ps->info.io_keys[i]) found = 1;
             if (!found && ne < 16) extra[ne++] = ps->info.io_keys[i];
         }
-        id<MTLFunction> vf = shader_fn(s->vs, vs, extra, ne, 0), pf = shader_fn(s->ps, ps, NULL, 0, k.depth_mask);
+        id<MTLFunction> vf = screen?screen_function(0):shader_fn(s->vs, vs, extra, ne, 0), pf = screen?screen_function(1):shader_fn(s->ps, ps, NULL, 0, k.depth_mask);
         if (!vf || !pf) return 0;
         NSMutableString *unused = [NSMutableString string];
         uint32_t streams;
         SMInfo vi = vs->info;
-        MTLVertexDescriptor *vd = vertex_desc(s, &vi, &streams, unused);
+        MTLVertexDescriptor *vd;
+        if(screen) {
+            vd=[MTLVertexDescriptor vertexDescriptor]; streams=1;
+            vd.attributes[0].format=MTLVertexFormatFloat4; vd.attributes[0].offset=0; vd.attributes[0].bufferIndex=0;
+            vd.attributes[1].format=MTLVertexFormatFloat2; vd.attributes[1].offset=16; vd.attributes[1].bufferIndex=0;
+            vd.layouts[0].stride=s->stream_stride[0];
+        } else vd = vertex_desc(s, &vi, &streams, unused);
         if (!vd) return 0;
         MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
         pd.vertexFunction = vf; pd.fragmentFunction = pf; pd.vertexDescriptor = vd;
@@ -546,6 +596,7 @@ static int setup_draw(D3DState *s) {
         if (!pso) { fprintf(stderr, "[metal] pipeline failed: %s\n", e.localizedDescription.UTF8String); return 0; }
         [pipe_keep addObject:pso];
         pe->k = k; pe->pso = pso; pe->streams = streams; pipe_count++;
+        if(screen)fprintf(stderr,"[metal] screen FVF pipeline ready fvf=%#x stride=%u\n",s->fvf,s->stream_stride[0]);
     }
     if (ec.pso != pe->pso) { [enc setRenderPipelineState:pe->pso]; ec.pso = pe->pso; }
 
@@ -619,6 +670,7 @@ static int setup_draw(D3DState *s) {
     ec_vbytes(s->vsi, sizeof s->vsi, 21);
     ec_vbytes(s->vsb, sizeof s->vsb, 22);
     float vsys[4] = {s->viewport[2] ? -1.0f / (float)s->viewport[2] : 0, s->viewport[3] ? 1.0f / (float)s->viewport[3] : 0, 0, 0};
+    if(screen)for(unsigned i=0;i<4;i++)vsys[i]=(float)s->viewport[i];
     ec_vbytes(vsys, sizeof vsys, 23);
     ec_fbuf(ring[ring_idx], last_ps_off, 0);
     ec_fbytes(s->psi, sizeof s->psi, 1);
