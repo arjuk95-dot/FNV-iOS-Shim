@@ -31,6 +31,11 @@ int main(int argc,char **argv){
         assert(query(b,sdk_3d,&s)==0);printf("base=%#x spatial=%#x alias=%d\n",b,s,b==s);fflush(stdout);
         // Exact order from aeafb0: drain base interface, then the separately stored 3D interface.
         drain(b);drain(s);
+    }else if(!strcmp(mode,"sdk-min-distance-abi")){
+        assert(query(b,sdk_3d,&s)==0);
+        // af1029 calls 3D slot17 with float distance and dwApply. The old alias
+        // reached SoundBuffer::SetFrequency instead and left four bytes on ESP.
+        assert(CALL(s,17,s,0x3f800000,1)==0);drain(b);drain(s);
     }else if(!strcmp(mode,"independent-counts")||!strcmp(mode,"listener")){
         assert(query(b,!strcmp(mode,"listener")?sdk_listener:sdk_3d,&s)==0);
         assert(s!=b);assert(CALL(b,2,b)==0);assert(allocation_find(b,0)->live);

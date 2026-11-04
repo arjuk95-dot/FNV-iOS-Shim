@@ -21,7 +21,7 @@ static int near(float a,float b){return fabsf(a-b)<0.002f;}
 int main(void){
     MEM=calloc(1,4u<<20);
     uint32_t create[]={0,0x2000,0};check("native DirectSound device",invoke(dsound_shims.list[0].fn,create,3)==0);uint32_t ds=G32(0x2000);
-    uint32_t desc=0x3000,wfx=0x3100;P32(desc,20);P32(desc+8,8);P32(desc+16,wfx);
+    uint32_t desc=0x3000,wfx=0x3100;P32(desc,20);P32(desc+4,0x10);P32(desc+8,8);P32(desc+16,wfx);
     P32(wfx,1|(1u<<16));P32(wfx+4,48000);P32(wfx+8,96000);P32(wfx+12,2|(16u<<16));
     check("PCM mono buffer creation",M(ds,3,ds,desc,0x2004,0)==0);uint32_t b=G32(0x2004);
     check("real buffer lock",M(b,11,b,0,8,0x4000,0x4004,0x4008,0x400c,2)==0&&G32(0x4004)==8);
@@ -39,8 +39,9 @@ int main(void){
     check("duplicate shares sample storage",M(ds,5,ds,b,0x2008)==0);uint32_t duplicate=G32(0x2008);M(b,2,b);
     M(duplicate,15,duplicate,0);M(duplicate,16,duplicate,0);M(duplicate,13,duplicate,0);M(duplicate,12,duplicate,0,0,0);fnv_audio_mix(left,right,4,48000);
     check("duplicate survives release of original",near(left[1],0.5f)&&near(right[3],-0.5f));M(duplicate,2,duplicate);
-    M(ds,3,ds,desc,0x2004,0);b=G32(0x2004);P32(0x5000,0x279f9a86);M(b,0,b,0x5000,0x2010);uint32_t spatial=G32(0x2010);
-    check("3D interface retains its parent sound buffer",M(b,2,b)==1);M(spatial,2,spatial);check("last 3D reference releases parent",G32(b)==0xddddddddu);
+    const uint8_t sdk3d[16]={0x86,0xfa,0x9a,0x27,0x81,0x49,0xce,0x11,0xa5,0x21,0,0x20,0xaf,0x0b,0xe5,0x60};
+    M(ds,3,ds,desc,0x2004,0);b=G32(0x2004);memcpy(MEM+0x5000,sdk3d,16);M(b,0,b,0x5000,0x2010);uint32_t spatial=G32(0x2010);
+    check("3D interface preserves owner with an independent count",spatial!=b&&M(b,2,b)==0&&G32(b)!=0xddddddddu);M(spatial,2,spatial);check("last 3D reference releases owner",G32(b)==0xddddddddu);
     uint32_t v=fnv_audio_voice_create(4,1,48000,8,1);uint8_t p8[]={128,255,0,128};fnv_audio_voice_write(v,0,p8,4);fnv_audio_voice_play(v,0);fnv_audio_mix(left,right,4,48000);
     check("unsigned 8-bit PCM is centered at silence",near(left[0],0)&&near(left[1],127/128.f)&&near(left[2],-1));fnv_audio_voice_destroy(v);
     check("unsupported format is rejected",fnv_audio_voice_create(16,6,48000,16,1)==0);
