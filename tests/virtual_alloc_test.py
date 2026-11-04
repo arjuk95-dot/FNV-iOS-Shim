@@ -10,7 +10,7 @@ with tempfile.TemporaryDirectory() as temp:
     subprocess.run(['xcrun','clang','-O1','-ffunction-sections','-fdata-sections','-I',str(root/'ios'),'-I',str(root/'upstream/recomp/host'),'-I',str(root/'upstream/recomp'),
         *flags,str(root/'tests/virtual_alloc_test.c'),'-Wl,-dead_strip','-o',str(binary)],check=True)
     failures=[]
-    for mode in ['occupied','future-heap','future-pages','unreserved-commit','partial-commit','rounding','valid-commit','overflow','zero']:
+    for mode in ['occupied','future-heap','future-pages','unreserved-commit','partial-commit','rounding','valid-commit','overflow','zero','spanning-future','spanning-occupied','adjacent']:
         result=subprocess.run([str(binary),mode],timeout=15)
         if result.returncode:failures.append(mode)
     if args.reference:

@@ -24,5 +24,8 @@ int main(int argc,char **argv){
     else if(!strcmp(mode,"valid-commit")){assert(allocate(0x31000000,65536,0x2000)==0x31000000);uint32_t p=allocate(0x31001000,4096,0x1000);MEM[p]=0x5a;ok=p==0x31001000&&allocate(p,4096,0x1000)==p&&MEM[p]==0x5a;}
     else if(!strcmp(mode,"overflow")){ok=allocate(0xfffff000,8192,0x2000)==0;}
     else if(!strcmp(mode,"zero")){ok=allocate(0,0,0x3000)==0;}
+    else if(!strcmp(mode,"spanning-future")){uint32_t r=allocate(0x20000000,0x40000000,0x2000);uint32_t p=gmalloc(4096);ok=r==0x20000000&&p>=0x60000000;printf("large fixed=%#x host=%#x\n",r,p);}
+    else if(!strcmp(mode,"spanning-occupied")){uint32_t p=gmalloc(4096);MEM[p]=0x5a;ok=allocate(0x20000000,0x40000000,0x2000)==0&&MEM[p]==0x5a;}
+    else if(!strcmp(mode,"adjacent")){assert(allocate(0x41400000,4<<20,0x2000)==0x41400000);assert(allocate(0x41000000,4<<20,0x2000)==0x41000000);uint32_t p=gmalloc(24<<20);ok=p>=0x41800000;}
     printf("%s: %s\n",ok?"PASS":"FAIL",mode);return ok?0:1;
 }

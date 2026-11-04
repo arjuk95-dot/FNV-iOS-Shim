@@ -22,7 +22,7 @@ static unsigned fixed_count;
 int gheap_reserve_fixed(uint32_t lo,uint32_t hi){
     if(lo>=hi)return 0;
     L;
-    int ok=!(lo<brk_&&HEAP_LO<hi);
+    int ok=!(brk_>HEAP_LO&&lo<brk_&&HEAP_LO<hi);
     for(unsigned i=0;ok&&i<fixed_count;i++)if(lo<fixed_ranges[i].hi&&fixed_ranges[i].lo<hi)ok=0;
     if(ok&&lo<HEAP_HI&&HEAP_LO<hi){
         if(fixed_count==4096)ok=0;
