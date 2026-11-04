@@ -15,6 +15,21 @@ static pthread_mutex_t hl = PTHREAD_MUTEX_INITIALIZER;
 #define HDR 16                       // [size:4][class:4][pad:8] before every block (16-aligned)
 #define NCLASS 20                    // 16 B .. 8 MB
 static uint32_t brk_ = HEAP_LO;
+static struct {uint32_t lo,hi;} fixed_ranges[4096];
+static unsigned fixed_count;
+// Shared address ownership: fixed Win32 reservations cannot cover current heap storage,
+// and future heap/page allocations must skip them. Called under VirtualAlloc's outer lock.
+int gheap_reserve_fixed(uint32_t lo,uint32_t hi){
+    if(lo>=hi)return 0;
+    L;
+    int ok=!(lo<brk_&&HEAP_LO<hi);
+    for(unsigned i=0;ok&&i<fixed_count;i++)if(lo<fixed_ranges[i].hi&&fixed_ranges[i].lo<hi)ok=0;
+    if(ok&&lo<HEAP_HI&&HEAP_LO<hi){
+        if(fixed_count==4096)ok=0;
+        else{fixed_ranges[fixed_count].lo=lo;fixed_ranges[fixed_count++].hi=hi;}
+    }
+    UL;return ok;
+}
 // accounting (bytes taken from the bump pointer, by kind; live bytes handed out by gmalloc)
 static uint64_t st_bump_class, st_bump_huge, st_bump_pages, st_huge_freed, st_live;
 static uint32_t freelist[NCLASS];
@@ -24,10 +39,17 @@ static int cls(uint32_t n) { int c = 0; uint32_t s = 16; while (s < n && c < NCL
 static uint32_t csize(int c) { return 16u << c; }
 
 static uint32_t bump(uint32_t n) {
-    uint32_t p = (brk_ + 15) & ~15u;
-    if ((uint64_t)p + n > HEAP_HI) { fprintf(stderr, "[gheap] out of guest memory\n"); abort(); }
-    brk_ = p + n;
-    return p;
+    uint64_t p=((uint64_t)brk_+15)&~15ull;
+    for(;;){
+        int moved=0;
+        for(unsigned i=0;i<fixed_count;i++)if(p<fixed_ranges[i].hi&&fixed_ranges[i].lo<p+n){
+            fprintf(stderr,"[address-map] heap skips reserved %#x..%#x request=%u\n",fixed_ranges[i].lo,fixed_ranges[i].hi,n);
+            p=((uint64_t)fixed_ranges[i].hi+4095)&~4095ull;moved=1;break;
+        }
+        if(!moved)break;
+    }
+    if(p+n>HEAP_HI){fprintf(stderr,"[gheap] out of guest memory after address reservations\n");abort();}
+    brk_=(uint32_t)(p+n);return (uint32_t)p;
 }
 
 static uint32_t gmalloc_u(uint32_t size) {

@@ -170,24 +170,33 @@ static int overlaps(uint32_t lo, uint32_t hi) {
 static void reserve(uint32_t lo, uint32_t hi) { if (nres < MAXRES) { res[nres].lo = lo; res[nres].hi = hi; nres++; } }
 #include <pthread.h>
 static pthread_mutex_t va_lk = PTHREAD_MUTEX_INITIALIZER;
+int gheap_reserve_fixed(uint32_t lo,uint32_t hi);
 static void VirtualAlloc_locked(CPU *c);
 SHIM(VirtualAlloc_) { pthread_mutex_lock(&va_lk); VirtualAlloc_locked(c); pthread_mutex_unlock(&va_lk); }
 static void VirtualAlloc_locked(CPU *c) {
     uint32_t a = ARG(c, 0), n = ARG(c, 1), type = ARG(c, 2);
+    if(!n || (uint64_t)a+n>0x100000000ull || !(type&0x3000)){last_error=87;RET(c,0,4);return;}
     if (!nres) {    // first call: the image and the low 64 KB are taken
         reserve(0, 0x10000);
         reserve(host_image_base, host_image_base + G32(host_image_base + G32(host_image_base + 0x3C) + 24 + 56));
     }
-    if (!a) { uint32_t p = gpages(n); reserve(p, p + ((n + 0xFFF) & ~0xFFFu)); RET(c, p, 4); return; }
-    uint32_t lo = a & ~0xFFFu, hi = (a + n + 0xFFF) & ~0xFFFu;
+    uint64_t end=((uint64_t)a+n+4095)&~4095ull;
+    if(end>0xffffffffu || n>0xeffff000u){last_error=87;RET(c,0,4);return;}
+    if (!a) { if(nres==MAXRES){last_error=8;RET(c,0,4);return;}uint32_t p = gpages(n); reserve(p, p + ((n + 0xFFF) & ~0xFFFu)); RET(c, p, 4); return; }
+    uint32_t lo = a & ((type&0x2000)?~0xffffu:~0xfffu), hi = (uint32_t)end;
     int i = overlaps(lo, hi);
     if (type & 0x2000) {                        // MEM_RESERVE at a fixed address
-        if (i >= 0) { last_error = 487; RET(c, 0, 4); return; }
-        reserve(lo, hi); RET(c, a, 4); return;
+        int ok=i<0&&nres<MAXRES&&gheap_reserve_fixed(lo,hi);
+        fprintf(stderr,"[address-map] fixed request=%#x bytes=%#x span=%#x..%#x result=%#x caller=%#x\n",a,n,lo,hi,ok?lo:0,G32(REG(c,R_ESP)));
+        if (!ok) { last_error = 487; RET(c, 0, 4); return; }
+        reserve(lo, hi); RET(c, lo, 4); return;
     }
-    // MEM_COMMIT inside an existing reservation (or an untracked fixed address)
-    if (i < 0) reserve(lo, hi);
-    RET(c, a, 4);
+    // A commit must be wholly inside an existing reservation, including already committed pages.
+    if(i<0 || lo<res[i].lo || hi>res[i].hi){
+        fprintf(stderr,"[address-map] rejected unreserved commit %#x..%#x caller=%#x\n",lo,hi,G32(REG(c,R_ESP)));
+        last_error=487;RET(c,0,4);return;
+    }
+    RET(c, lo, 4);
 }
 SHIM(VirtualFree_) { RET(c, 1, 3); }
 SHIM(VirtualQuery_) { RET(c, 0, 3); }
