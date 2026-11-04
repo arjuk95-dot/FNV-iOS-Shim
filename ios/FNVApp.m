@@ -97,6 +97,9 @@ static NSString *exeHash(NSURL *url) {
     NSURL *docs = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
     NSURL *log = [docs URLByAppendingPathComponent:@"fnv.log"];
     freopen(log.fileSystemRepresentation, "w", stderr); setvbuf(stderr, NULL, _IONBF, 0);
+    NSString *revision=[NSBundle.mainBundle objectForInfoDictionaryKey:@"FNVBuildSourceCommit"]?:@"unknown";
+    NSString *buildVersion=[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"]?:@"unknown";
+    fprintf(stderr,"[build] source=%s version=%s\n",revision.UTF8String,buildVersion.UTF8String);
     CGSize native=UIScreen.mainScreen.nativeBounds.size;fnv_display_configure((unsigned)native.width,(unsigned)native.height);
 #ifdef FNV_PROBE
     fnv_use_analog(1);
