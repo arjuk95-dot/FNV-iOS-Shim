@@ -14,3 +14,6 @@ unsigned fnv_display_height(void){return height;}
 void fnv_display_client(unsigned w,unsigned h){if(w&&h){client_width=w;client_height=h;}}
 unsigned fnv_client_width(void){return client_width;}
 unsigned fnv_client_height(void){return client_height;}
+// Keep the established guest adapter identity stable. Startup compares it with
+// sD3DDevice before deciding whether to tear down workers and invoke the launcher.
+const char *fnv_display_adapter_description(void){return "NVIDIA GeForce GTX 580";}

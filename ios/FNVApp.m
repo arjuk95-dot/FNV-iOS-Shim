@@ -3,6 +3,7 @@
 #import "FNVGameplayTouchView.h"
 #import "FNVPad.h"
 #include "FNVDisplay.h"
+#import "FNVPreferences.h"
 #ifndef FNV_PROBE
 #include "FNVNativeMedia.h"
 #endif
@@ -122,25 +123,17 @@ static NSString *exeHash(NSURL *url) {
     setenv("FNV_TRACE_FILES", "1", 1);
     setenv("FNV_TRACE_SYNC", "1", 1);
     fnv_use_analog(1);
-    // Update only owned display/controller keys; preserve the synchronous NavMesh setting and all other INI content.
+    // Match the published adapter before guest startup. A mismatch takes the
+    // Windows launcher path after shutting down the shared pathfinding workers.
     NSString *prefs=[root.path stringByAppendingPathComponent:@"UserDocuments/My Games/FalloutNV/FalloutPrefs.ini"];
     for(NSString *leaf in [NSFileManager.defaultManager contentsOfDirectoryAtPath:prefs.stringByDeletingLastPathComponent error:NULL])
         if([leaf caseInsensitiveCompare:@"FalloutPrefs.ini"]==NSOrderedSame){prefs=[prefs.stringByDeletingLastPathComponent stringByAppendingPathComponent:leaf];break;}
     NSString *text=[NSString stringWithContentsOfFile:prefs encoding:NSISOLatin1StringEncoding error:NULL]?:@"";
     if([NSFileManager.defaultManager fileExistsAtPath:prefs]&&![NSFileManager.defaultManager fileExistsAtPath:[prefs stringByAppendingString:@".before-native-display"]])
         [NSFileManager.defaultManager copyItemAtPath:prefs toPath:[prefs stringByAppendingString:@".before-native-display"] error:NULL];
-    NSMutableArray<NSString*> *lines=[[text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] mutableCopy];
-    NSDictionary *settings=@{@"display":@{@"isize w":@[@"iSize W",@(fnv_display_width())],@"isize h":@[@"iSize H",@(fnv_display_height())],@"bfull screen":@[@"bFull Screen",@1]},@"controls":@{@"buse joystick":@[@"bUse Joystick",@1]}};
-    for(NSString *section in settings){NSDictionary *keys=settings[section];NSMutableSet *pending=[NSMutableSet setWithArray:keys.allKeys];BOOL inside=NO;NSInteger insert=-1;
-        for(NSUInteger i=0;i<lines.count;i++){NSString *line=[lines[i] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-            if([line hasPrefix:@"["]&&[line hasSuffix:@"]"]){if(inside&&insert<0)insert=i;inside=[[[line substringWithRange:NSMakeRange(1,line.length-2)] lowercaseString] isEqualToString:section];}
-            else if(inside){NSRange equal=[line rangeOfString:@"="];if(equal.location!=NSNotFound){NSString *key=[[[line substringToIndex:equal.location] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet] lowercaseString];NSArray *value=keys[key];if(value){lines[i]=[NSString stringWithFormat:@"%@=%@",value[0],value[1]];[pending removeObject:key];}}}
-        }
-        if(insert<0){insert=lines.count;if(!inside){[lines addObject:[NSString stringWithFormat:@"[%@]",section]];insert++;}}
-        for(NSString *key in pending){NSArray *value=keys[key];[lines insertObject:[NSString stringWithFormat:@"%@=%@",value[0],value[1]] atIndex:insert++];}
-    }
     [NSFileManager.defaultManager createDirectoryAtPath:prefs.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL];
-    NSError *prefsError=nil;BOOL prefsOK=[[lines componentsJoinedByString:@"\n"] writeToFile:prefs atomically:YES encoding:NSISOLatin1StringEncoding error:&prefsError];
+    NSError *prefsError=nil;BOOL prefsOK=[fnv_display_preferences(text) writeToFile:prefs atomically:YES encoding:NSISOLatin1StringEncoding error:&prefsError];
+    if(!prefsOK){self.status.text=[NSString stringWithFormat:@"Could not prepare game preferences: %@",prefsError.localizedDescription];return YES;}
     fprintf(stderr,"[display] preferred %ux%u native aspect; controller + relative swipe; preferences=%s\n",fnv_display_width(),fnv_display_height(),prefsOK?"written":prefsError.localizedDescription.UTF8String);
     fnv_audio_start();
     self.status.text = nil;

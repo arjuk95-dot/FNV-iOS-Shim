@@ -717,7 +717,7 @@ static void D3D_GetAdapterIdentifier(CPU *c) {
     uint32_t p = ARG(c, 3);
     memset(MEM + p, 0, 1100);
     strcpy((char *)MEM + p, "nvd3dum.dll");                  // Driver[512]
-    strcpy((char *)MEM + p + 512, "NVIDIA GeForce GTX 580");  // Description[512]
+    strcpy((char *)MEM + p + 512, fnv_display_adapter_description()); // Description[512]
     strcpy((char *)MEM + p + 1024, "\\\\.\\DISPLAY1");         // DeviceName[32]
     P32(p + 1056, 0x0008000F); P32(p + 1060, 0x000D0C4A);     // DriverVersion (8.17.12.6658)
     P32(p + 1064, 0x10DE); P32(p + 1068, 0x1080); P32(p + 1072, 0); P32(p + 1076, 0xA1);   // vendor, device, subsys, rev

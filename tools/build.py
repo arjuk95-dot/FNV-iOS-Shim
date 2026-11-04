@@ -62,7 +62,7 @@ def main():
         args.cache.mkdir(parents=True,exist_ok=True)
         if (args.cache/'manifest.json').exists():old_manifest=json.loads((args.cache/'manifest.json').read_text())
     name = 'FNVShimProbe' if probe else 'FNVGame'
-    sources = [I/'FNVApp.m',I/'FNVGameplayTouchView.m',I/'FNVPad.c',I/'FNVDisplay.c',H/'d3d9_metal.m']
+    sources = [I/'FNVApp.m',I/'FNVGameplayTouchView.m',I/'FNVPad.c',I/'FNVDisplay.c',I/'FNVPreferences.m',H/'d3d9_metal.m']
     if probe:
         sources += [I/'FNVProbe.c', I/'ProbeRuntime.c']
         sources += [H/(s+'.c') for s in ['d3d9','dinput','com','gheap','input','sm2msl']]

@@ -22,6 +22,8 @@ jobs:
       - run: python3 tests/bink_shims_test.py
       - run: python3 tests/native_video_test.py
       - run: python3 tests/input_display_test.py
+      - run: python3 tests/display_preferences_test.py --reference
+      - run: python3 tests/display_preferences_test.py
       - run: gh run download 41685697032 --repo "$GITHUB_REPOSITORY" --name FNV-public-codecs-ios --dir build/codecs-ios
       - run: python3 tools/build.py host-check --codec-prefix build/codecs-ios
       - run: python3 tools/startup_build.py --host-check --out build/startup

@@ -6,3 +6,4 @@ unsigned fnv_display_height(void);
 void fnv_display_client(unsigned width,unsigned height);
 unsigned fnv_client_width(void);
 unsigned fnv_client_height(void);
+const char *fnv_display_adapter_description(void);
