@@ -163,7 +163,14 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
             UIImage *icon=symbol?[[UIImage systemImageNamed:symbol] imageWithTintColor:[self amber:opacity] renderingMode:UIImageRenderingModeAlwaysOriginal]:nil;
             BOOL label=[b[@"label"] boolValue];CGFloat iconSize=MIN(27,_frames[i].size.width*.38);
             if(icon)[icon drawInRect:CGRectMake(CGRectGetMidX(_frames[i])-iconSize/2,CGRectGetMidY(_frames[i])-iconSize/2-(label?6:0),iconSize,iconSize)];
-            if(label||!icon)[self text:names[i] rect:CGRectMake(_frames[i].origin.x+2,CGRectGetMidY(_frames[i])+(icon?8:-8),_frames[i].size.width-4,30) size:MIN(12,_frames[i].size.width/4) color:[self amber:opacity]];
+            if(label||!icon){
+                CGFloat labelSize=MIN(12,_frames[i].size.width/4);
+                for(NSString *word in [names[i] componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet]){
+                    CGFloat width=[word sizeWithAttributes:@{NSFontAttributeName:[UIFont systemFontOfSize:labelSize weight:UIFontWeightMedium]}].width;
+                    if(width>_frames[i].size.width-6)labelSize*=(_frames[i].size.width-6)/width;
+                }
+                [self text:names[i] rect:CGRectMake(_frames[i].origin.x+2,CGRectGetMidY(_frames[i])+(icon?8:-8),_frames[i].size.width-4,30) size:labelSize color:[self amber:opacity]];
+            }
         }
     }
     if(_standardFallback){

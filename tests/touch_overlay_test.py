@@ -18,6 +18,7 @@ def command(*args, timeout=90):
 
 
 def sim(*args, timeout=90):
+    print('Simulator: ' + args[0], flush=True)
     return command('xcrun', 'simctl', *args, timeout=timeout)
 
 
@@ -77,9 +78,21 @@ def main():
                                   physical_gesture_recognition_verified=False)), flush=True)
             assert report['failures'] == 0, 'Native UIKit touch overlay regression failed'
     finally:
-        subprocess.run(['xcrun', 'simctl', 'terminate', identifier, BUNDLE], capture_output=True, timeout=15)
-        subprocess.run(['xcrun', 'simctl', 'shutdown', identifier], capture_output=True, timeout=30)
-        subprocess.run(['xcrun', 'simctl', 'delete', identifier], capture_output=True, timeout=30)
+        # Shutting down our isolated simulator also stops the app. A separate
+        # terminate request can stall after successful tests; always attempt
+        # deletion even if shutdown times out or reports an already-off device.
+        cleanup = []
+        deleted = False
+        for operation, timeout in [('shutdown', 90), ('delete', 60)]:
+            try:
+                result = subprocess.run(['xcrun', 'simctl', operation, identifier], capture_output=True, text=True, timeout=timeout)
+                cleanup.append(dict(operation=operation, exit_code=result.returncode, output=(result.stdout + result.stderr)[-2000:]))
+                if operation == 'delete':
+                    deleted = result.returncode == 0
+            except subprocess.TimeoutExpired:
+                cleanup.append(dict(operation=operation, timed_out=True))
+        (OUTPUT / 'simulator-cleanup.json').write_text(json.dumps(cleanup, indent=2))
+        assert deleted, 'Could not delete the isolated test simulator; inspect simulator-cleanup.json'
 
 
 if __name__ == '__main__':
