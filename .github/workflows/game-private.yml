@@ -1,3 +1,5 @@
+# Dispatch this workflow in the private build mirror; public repositories reject
+# executable-derived inputs before downloading them.
 name: Build approved private game inputs
 on:
   workflow_dispatch:
