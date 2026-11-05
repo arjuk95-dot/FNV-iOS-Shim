@@ -1,0 +1,6 @@
+Built-in image_gen edit, 2026-11-05. Source: owner-supplied helmet/red-goggle reference.
+
+Prompt:
+Edit the supplied image into a polished square iOS app icon, 1024 by 1024. The supplied picture is the edit target. Preserve the distinctive weathered dark steel ranger helmet, respirator, and two intense red glowing eye lenses from this exact portrait, with the same moody realistic game-art appearance. Remove the outer white square background, bottom cast shadow and circular badge rim. Compose the helmet as a strong close portrait against a continuous near-black charcoal background that fills the entire square edge to edge, preserving a little breathing room around the helmet so it reads clearly at small icon sizes. No white border, no circular frame, no text, no added logos, no extra objects, no rounded corners, no transparency. This is the production app-icon artwork for the user's existing Fallout New Vegas iPhone port.
+
+The generated 1254-pixel square is kept unchanged here. The Apple asset compiler build step normalizes its input to 1024 pixels and generates device icon renditions.

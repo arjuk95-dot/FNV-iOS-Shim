@@ -49,6 +49,7 @@ jobs:
       - run: python3 tests/touch_controls_test.py
       - run: python3 tests/guest_diagnostics_test.py
       - run: python3 tests/touch_settings_test.py
+      - run: python3 tests/app_icon_test.py
       - run: python3 tests/display_preferences_test.py --reference
       - run: python3 tests/display_preferences_test.py
       - run: python3 tools/fetch_codecs.py ios --out build/codecs-ios

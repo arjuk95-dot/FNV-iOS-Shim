@@ -14,6 +14,7 @@ import zipfile
 from state_probes import normalize,instrument
 from native_codecs import validate as validate_codecs
 import hybrid_input
+from app_icon import compile_icon
 
 ROOT = Path(__file__).resolve().parents[1]
 R = ROOT / 'upstream/recomp'
@@ -127,6 +128,7 @@ def main():
                   UISupportedInterfaceOrientations=['UIInterfaceOrientationLandscapeLeft','UIInterfaceOrientationLandscapeRight'])
         if not probe: info['FNVExecutableSHA256']=digest(args.exe)
         info['FNVHybridCameraSites']=[hex(site) for site in sorted(hybrid)]
+        if not probe: info.update(compile_icon(tmp,app))
         try:
             info['FNVBuildSourceCommit']=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True,stderr=subprocess.DEVNULL).strip()
         except (OSError, subprocess.CalledProcessError):
