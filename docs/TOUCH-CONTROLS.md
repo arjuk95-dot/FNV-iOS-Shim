@@ -38,8 +38,31 @@ still during calibration. Gyro and touch are combined before relative-count
 quantization in Direct mode. Controller response combines them before stick
 clamping and discards overflow rather than queuing unwanted rotation.
 
-Settings use the versioned `FNVTouchControls.v4` preference and safe-area-relative
+Settings use the versioned `FNVTouchControls.v5` preference and safe-area-relative
 positions. They do not edit game INIs or saves.
+
+## Move actions between Radial and More
+
+Choose **Customize Controls → Utilities**. Each of the seven radial sectors and
+six More entries has an action chooser. Choosing an action swaps it with the
+selected slot, including across the two menus. You can put Holster, Light, Wait,
+Pause or Customize Controls on the radial, or move Reload, Change Ammo, Camera,
+Gyro and Weapons into More. Reorder either list the same way. Apply saves both
+lists; Cancel restores both. **Reset Utilities** restores only utility assignments,
+placement and hold timing.
+
+The default radial is Reload, Crouch, Weapons, **Holster / Ready**, Camera View,
+Gyro and More. Change Ammo is in More. Existing pre-v5 radial ordering is retained
+with Holster replacing Change Ammo in its previous sector. Other control positions
+and sensitivities are retained, and earlier preference versions remain available
+for rollback.
+
+More's navigation entry stays on the radial and can move between radial sectors.
+Its popup always has Back. This keeps every action reachable while rearranging.
+Hold durations and native gamepad bindings belong to the action and follow it
+between menus. Gyro's visible state and the persistent Weapons submenu work from
+either location. The Utilities tab's Preview shows the current radial and lets you
+drag it into position without executing game actions.
 
 ## Classic swipe and gyro baseline
 

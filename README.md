@@ -29,7 +29,8 @@ ARM64 runtime with Metal graphics, alongside an iOS interface for touch controls
 - **Optional gyro:** aiming-only or always during gameplay, with calibration,
   inversion and a wider sensitivity range. Gyro stays off in game menus.
 - **Utilities without clutter:** hold Pip-Boy for reload, crouch, weapon hotkeys,
-  ammunition, camera view, gyro and More.
+  holster/ready, camera view, gyro and More. Move actions between the wheel and More
+  in Customize Controls → Utilities; Change Ammo starts in More.
 - **Editable layouts:** move, resize, fade or hide controls; adjust the movement
   and navigation regions; keep separate gameplay and Pip-Boy layouts.
 - **Controller fallback:** double-tap with three fingers to show a standard
