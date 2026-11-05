@@ -2,22 +2,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <time.h>
 #include "input.h"
 
 static pthread_mutex_t lk = PTHREAD_MUTEX_INITIALIZER;
 static uint8_t keys[256];
 static int32_t mdx, mdy, mdz;
+static int64_t touch_mdx,touch_mdy;
 static uint8_t mbtn[8];
 #define QN 1024
-typedef struct { uint32_t ofs, data; } Ev;
+typedef struct { uint32_t ofs, data; int touch; } Ev;
 static Ev q[2][QN];
 static int qh[2], qt[2];
 
 static void push(int dev, uint32_t ofs, uint32_t data) {
     int n = (qt[dev] + 1) % QN;
     if (n == qh[dev]) qh[dev] = (qh[dev] + 1) % QN;       // drop oldest on overflow
-    q[dev][qt[dev]] = (Ev){ofs, data};
+    q[dev][qt[dev]] = (Ev){ofs, data,0};
     qt[dev] = n;
 }
 
@@ -63,6 +65,19 @@ void input_mouse_move(int dx, int dy) {
     if (dy) push(1, 4, (uint32_t)dy);
     pthread_mutex_unlock(&lk);
 }
+void input_touch_mouse_move(int dx,int dy){
+    pthread_mutex_lock(&lk);
+    touch_mdx+=dx;touch_mdy+=dy;
+    if(dx){push(1,0,(uint32_t)dx);q[1][(qt[1]+QN-1)%QN].touch=1;}
+    if(dy){push(1,4,(uint32_t)dy);q[1][(qt[1]+QN-1)%QN].touch=1;}
+    pthread_mutex_unlock(&lk);
+}
+void input_touch_mouse_reset(void){
+    pthread_mutex_lock(&lk);touch_mdx=touch_mdy=0;
+    int write=qh[1];
+    for(int read=qh[1];read!=qt[1];read=(read+1)%QN)if(!q[1][read].touch){q[1][write]=q[1][read];write=(write+1)%QN;}
+    qt[1]=write;pthread_mutex_unlock(&lk);
+}
 void input_mouse_wheel(int dz) { pthread_mutex_lock(&lk); mdz += dz; push(1, 8, (uint32_t)dz); pthread_mutex_unlock(&lk); }
 void input_mouse_button(int b, int down) {
     if (b < 0 || b > 7) return;
@@ -74,7 +89,9 @@ void input_mouse_button(int b, int down) {
 void input_keyboard_state(uint8_t out[256]) { pthread_mutex_lock(&lk); memcpy(out, keys, 256); pthread_mutex_unlock(&lk); }
 void input_mouse_state(int32_t *dx, int32_t *dy, int32_t *dz, uint8_t b[8]) {
     pthread_mutex_lock(&lk);
-    *dx = mdx; *dy = mdy; *dz = mdz; mdx = mdy = mdz = 0; memcpy(b, mbtn, 8);
+    int64_t x=(int64_t)mdx+touch_mdx,y=(int64_t)mdy+touch_mdy;
+    *dx = (int32_t)(x>INT_MAX?INT_MAX:x<INT_MIN?INT_MIN:x); *dy = (int32_t)(y>INT_MAX?INT_MAX:y<INT_MIN?INT_MIN:y); *dz = mdz;
+    mdx = mdy = mdz = 0;touch_mdx=touch_mdy=0;memcpy(b, mbtn, 8);
     pthread_mutex_unlock(&lk);
 }
 int input_pending(int dev) { pthread_mutex_lock(&lk); int n = (qt[dev] - qh[dev] + QN) % QN; pthread_mutex_unlock(&lk); return n; }

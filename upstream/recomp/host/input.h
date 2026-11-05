@@ -5,6 +5,8 @@
 // the DirectInput shims. Thread-safe.
 void input_key(int dik, int down);                 // DirectInput scancode (DIK_*)
 void input_mouse_move(int dx, int dy);
+void input_touch_mouse_move(int dx,int dy);
+void input_touch_mouse_reset(void);
 void input_mouse_wheel(int dz);
 void input_mouse_button(int b, int down);
 void input_script_tick(uint64_t frame);

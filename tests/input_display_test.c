@@ -10,9 +10,11 @@ uint8_t *MEM;HostImport host_imports[MAX_IMPORTS];int host_import_count;static u
 uint32_t gmalloc(uint32_t n){unsigned p=heap;heap+=n+16;return p;}void gfree(uint32_t p){(void)p;}
 void gheap_report(void){}
 void rt_trap(CPU *c,int n,uint32_t a){(void)c;(void)n;(void)a;abort();}
-void fnv_input_mouse_camera(CPU *,uint32_t);extern const ShimTable xinput_shims;
+void fnv_input_mouse_camera(CPU *,uint32_t);extern const ShimTable xinput_shims,dinput_shims;
 static void check(const char *name,int ok){printf("%s: %s\n",ok?"PASS":"FAIL",name);failed+=!ok;}
-static unsigned call(unsigned index,const uint32_t *args,unsigned n){CPU c={0};SETREG(&c,R_ESP,0x1000);P32(0x1000,0x123abc);for(unsigned i=0;i<n;i++)P32(0x1004+4*i,args[i]);xinput_shims.list[index].fn(&c);if(REG(&c,R_ESP)!=0x1004+4*n)abort();return REG(&c,R_EAX);}
+static unsigned call_fn(ShimFn fn,const uint32_t *args,unsigned n){CPU c={0};SETREG(&c,R_ESP,0x1000);P32(0x1000,0x123abc);for(unsigned i=0;i<n;i++)P32(0x1004+4*i,args[i]);fn(&c);if(REG(&c,R_ESP)!=0x1004+4*n)abort();return REG(&c,R_EAX);}
+static unsigned call(unsigned index,const uint32_t *args,unsigned n){return call_fn(xinput_shims.list[index].fn,args,n);}
+static unsigned method(uint32_t object,unsigned slot,const uint32_t *args,unsigned n){uint32_t thunk=G32(G32(object)+4*slot),index=(thunk-IMPORT_THUNK_BASE)/4,full[8]={object};if(thunk<IMPORT_THUNK_BASE||index>=(unsigned)host_import_count||n>=8)abort();for(unsigned i=0;i<n;i++)full[i+1]=args[i];return call_fn(host_imports[index].fn,full,n+1);}
 int main(void){
     MEM=calloc(1,32<<20);
     P32(0x11d8a80,0x30000);MEM[0x30000]=1;P32(0x3000c,1);
@@ -29,6 +31,30 @@ int main(void){
     check("camera compatibility changes only AL, preserving flags and guest state",!memcmp(&c,&expected,sizeof c));
     fnv_pad_stick_camera(1);c=expected;SETREG(&c,R_EAX,0xaabbcc01);CPU stickExpected=c;fnv_input_mouse_camera(&c,0x1234);
     check("stick-camera mode preserves original verified camera predicate",!memcmp(&c,&stickExpected,sizeof c));fnv_pad_stick_camera(0);
+    call_fn(dinput_shims.list[0].fn,(uint32_t[]){0,0x800,0,0x2400,0},5);uint32_t di=G32(0x2400);
+    P32(0x2500,0x6f1d2b60);method(di,3,(uint32_t[]){0x2500,0x2404,0},3);uint32_t mouse=G32(0x2404);
+    uint32_t ofs,event;while(input_pop_event(1,&ofs,&event,-1)){}
+    float sensitivity=.004f;memcpy(MEM+0x11e0a70,&sensitivity,4);
+    input_mouse_move(7,-3);fnv_pad_mouse_move(40,-20);method(mouse,9,(uint32_t[]){20,0x2800},2);
+    check("actual DirectInput mouse combines classic touch and independent mouse input",(int32_t)G32(0x2800)==47&&(int32_t)G32(0x2804)==-23);
+    check("live original mouse sensitivity reaches gyro calibration",fabs(fnv_pad_mouse_radians()-.004f)<1e-9);
+    method(mouse,9,(uint32_t[]){20,0x2800},2);check("touch-owned relative counts are consumed once",G32(0x2800)==0&&G32(0x2804)==0);
+    while(input_pop_event(1,&ofs,&event,-1)){}input_mouse_move(6,-4);fnv_pad_mouse_move(40,20);fnv_pad_reset();
+    check("touch reset removes only touch-owned buffered mouse events",input_pending(1)==2&&input_pop_event(1,&ofs,&event,-1)&&ofs==0&&(int32_t)event==6&&input_pop_event(1,&ofs,&event,-1)&&ofs==4&&(int32_t)event==-4);
+    method(mouse,9,(uint32_t[]){20,0x2800},2);check("touch reset preserves independent relative mouse state",(int32_t)G32(0x2800)==6&&(int32_t)G32(0x2804)==-4);
+    input_mouse_move(2,1);fnv_pad_mouse_move(80,90);MEM[0x11f308f+1002]=1;
+    method(mouse,9,(uint32_t[]){20,0x2800},2);check("Pip-Boy transition clears relative camera before the first mouse snapshot",G32(0x2800)==2&&G32(0x2804)==1&&fnv_pad_context()==FNVContextPipBoy);
+    fnv_pad_mouse_move(100,100);method(mouse,9,(uint32_t[]){20,0x2800},2);check("menus reject newly queued gameplay camera motion",G32(0x2800)==0&&G32(0x2804)==0);
+    MEM[0x11f308f+1002]=0;call(0,(uint32_t[]){0,0x2000},2);while(input_pop_event(1,&ofs,&event,-1)){}
+    input_mouse_move(6,-4);fnv_pad_mouse_move(40,20);MEM[0x11f308f+1056]=1;P32(0x27f0,8);
+    method(mouse,10,(uint32_t[]){20,0x2900,0x27f0,1},4);
+    check("VATS transition clears owned camera before buffered DirectInput reads",G32(0x27f0)==2&&G32(0x2900)==0&&(int32_t)G32(0x2904)==6&&G32(0x2914)==4&&(int32_t)G32(0x2918)==-4);
+    MEM[0x11f308f+1056]=0;call(0,(uint32_t[]){0,0x2000},2);method(mouse,9,(uint32_t[]){20,0x2800},2);while(input_pop_event(1,&ofs,&event,-1)){}
+    FNVPadState cameraPad={0};cameraPad.rx=17000;fnv_pad_mouse_move(42,84);input_mouse_move(1,2);fnv_pad_physical_state(&cameraPad,1);
+    method(mouse,9,(uint32_t[]){20,0x2800},2);check("physical takeover clears only the touch camera channel",G32(0x2800)==1&&G32(0x2804)==2);
+    c=stickExpected;fnv_input_mouse_camera(&c,0x1234);check("active physical camera preserves the original gamepad predicate",!memcmp(&c,&stickExpected,sizeof c));
+    cameraPad=(FNVPadState){0};fnv_pad_physical_state(&cameraPad,1);c=stickExpected;fnv_input_mouse_camera(&c,0x1234);check("idle connected pad does not impose a cap on direct touch look",REG(&c,R_EAX)==0xaabbcc00);
+    fnv_pad_physical_state(NULL,0);
     FNVLook look={100,100,0,0};FNVMouseDelta d=FNVLookTo(&look,110,96,1);check("swipe uses displacement without joystick velocity",d.dx==10&&d.dy==-4);d=FNVLookTo(&look,110,96,1);check("stationary touch produces no aim drift",!d.dx&&!d.dy);
     look=(FNVLook){200,150,0,0};d=FNVLookTo(&look,200,150,1);check("lift and re-touch do not jump camera",!d.dx&&!d.dy);
     FNVTouchVector movement=FNVTouchMove(1,0,54,.1,1);check("floating stick has a configurable radial dead zone",!movement.x&&!movement.y);

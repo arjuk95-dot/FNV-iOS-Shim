@@ -5,6 +5,12 @@
 #include <time.h>
 #include "com.h"
 #include "input.h"
+#include "FNVPad.h"
+#if defined(FNV_GAME_INPUT_CONTEXT) && !defined(FNV_PROBE)
+static void fnv_sample_game_context(void);
+#else
+static void fnv_sample_game_context(void){}
+#endif
 
 static uint32_t vt_di8, vt_dev;
 
@@ -24,6 +30,7 @@ static void report(void) {
             (unsigned long long)n_state[1], (unsigned long long)n_data[1], (unsigned long long)n_delivered[1]); }
 }
 static void Dev_GetDeviceState(CPU *c) {
+    fnv_sample_game_context();
     uint32_t n = ARG(c, 1), out = ARG(c, 2);
     n_state[dev_kind(c) & 1]++; report();
     memset(MEM + out, 0, n);
@@ -37,6 +44,7 @@ static void Dev_GetDeviceState(CPU *c) {
 }
 // GetDeviceData(cbObjectData, rgdod, pdwInOut, dwFlags): DIDEVICEOBJECTDATA = ofs, data, time, seq, appdata
 static void Dev_GetDeviceData(CPU *c) {
+    fnv_sample_game_context();
     uint32_t sz = ARG(c, 1), arr = ARG(c, 2), inout = ARG(c, 3), flags = ARG(c, 4), cap = G32(inout), n = 0;
     int dev = dev_kind(c), peek = (flags & 1) != 0;
     static uint32_t seq;
@@ -137,6 +145,8 @@ static void fnv_sample_game_context(void){
         last=value;previous_mode=mode;
     }
     fnv_pad_context_set(value);
+    uint32_t sensitivity_bits=G32(0x11e0a70);float sensitivity;
+    memcpy(&sensitivity,&sensitivity_bits,sizeof sensitivity);fnv_pad_camera_sensitivity(sensitivity);
     uint32_t input=G32(0x11f35cc);
     if(input&&input<0xffffe000u)fnv_pad_bindings_set(MEM+input+0x1be8);
 }

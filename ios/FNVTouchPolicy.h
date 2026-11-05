@@ -1,6 +1,7 @@
 #pragma once
 #include <math.h>
 #include <stddef.h>
+#include "FNVTouchMath.h"
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -45,6 +46,30 @@ static inline FNVTouchVector FNVTouchStick(double touchX,double touchY,double gy
     double magnitude=FNVTouchClamp(length/maxRate,0,1);
     double corrected=FNVTouchClamp(deadzone,0,.8)+(1-FNVTouchClamp(deadzone,0,.8))*pow(magnitude,1/FNVTouchClamp(response,.25,4));
     return(FNVTouchVector){vx/length*corrected,vy/length*corrected};
+}
+// Filter direction only: optional smoothing must not discard swipe distance or
+// keep rotating after the finger stops. A reversal starts in the new direction.
+static inline FNVTouchVector FNVTouchSmooth(FNVTouchVector previous,double x,double y,double dt,double smoothing){
+    double length=hypot(x,y),oldLength=hypot(previous.x,previous.y);
+    if(length==0)return(FNVTouchVector){0,0};
+    if(smoothing<=0||oldLength==0||previous.x*x+previous.y*y<=0)return(FNVTouchVector){x,y};
+    double alpha=1-exp(-FNVTouchClamp(dt,.001,.15)/smoothing);
+    double sx=previous.x/oldLength*(1-alpha)+x/length*alpha,sy=previous.y/oldLength*(1-alpha)+y/length*alpha;
+    double scale=length/fmax(1e-12,hypot(sx,sy));
+    return(FNVTouchVector){sx*scale,sy*scale};
+}
+// Original gameplay multiplies mouse counts by live fMouseSensitivity in
+// radians/count, then applies native zoom. This reproduces classic Aim 3x
+// exactly and expresses gyro gain as camera radians per device radian.
+static inline FNVMouseDelta FNVTouchRelative(FNVTouchVector *carry,double x,double y,double gyroX,double gyroY,double dt,double swipeX,double swipeY,double gyroGainX,double gyroGainY,double mouseRadians,double multiplier,double ads,int invertX,int invertY){
+    double sensitivity=isfinite(mouseRadians)&&mouseRadians>1e-6?mouseRadians:.002;
+    double gain=FNVTouchClamp(multiplier,.1,10)*FNVTouchClamp(ads,.1,4);
+    double dx=(x*swipeX*(invertX?-1:1)+gyroX*FNVTouchClamp(dt,0,.15)*gyroGainX/sensitivity)*gain+carry->x;
+    double dy=(y*swipeY*(invertY?-1:1)-gyroY*FNVTouchClamp(dt,0,.15)*gyroGainY/sensitivity)*gain+carry->y;
+    dx=FNVTouchClamp(dx,-1000000,1000000);dy=FNVTouchClamp(dy,-1000000,1000000);
+    FNVMouseDelta result={(int)dx,(int)dy};
+    *carry=(FNVTouchVector){dx-result.dx,dy-result.dy};
+    return result;
 }
 // Sector zero starts at twelve o'clock. A center/outside release cancels.
 static inline int FNVTouchSector(double dx,double dy,double inner,double outer,unsigned count){

@@ -1,10 +1,13 @@
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
+#include <stdlib.h>
 #include "FNVPad.h"
 #include "FNVTouchPolicy.h"
 static unsigned failed;
 void input_key(int key,int down){(void)key;(void)down;}
+void input_touch_mouse_reset(void){}
+void input_touch_mouse_move(int x,int y){(void)x;(void)y;}
 static void check(const char *name,int value){printf("%s: %s\n",value?"PASS":"FAIL",name);failed+=!value;}
 int main(void){
     fnv_use_analog(1);FNVPadState touch={0},out={0};touch.lx=12300;touch.ly=18000;touch.rx=17000;touch.ry=-12000;touch.left_trigger=touch.right_trigger=255;fnv_pad_touch_state(&touch);fnv_pad_snapshot(&out);
@@ -23,6 +26,29 @@ int main(void){
     a=FNVTouchStick(0,0,0,0,1.0/60,.2,.2,360,.24,1.6,0,0);check("stationary right stick has no tail",a.x==0&&a.y==0);
     a=FNVTouchStick(10,0,-120,0,1.0/60,.2,.2,360,.24,1.6,0,0);check("gyro combines before clamp",a.x==0&&a.y==0);
     a=FNVTouchStick(10000,10000,800,800,1.0/60,.2,.2,360,.24,1.6,0,0);check("combined maximum is bounded",hypot(a.x,a.y)<=1.000001);
+    FNVTouchVector carry={0};FNVLook classic={0};int equal=1;double x=0,y=0;
+    const double packets[][3]={{.125,-.25,.016},{1.5,2.25,.033},{40,-10,.010},{258.375,8,.140}};
+    for(unsigned i=0;i<4;i++){x+=packets[i][0];y+=packets[i][1];FNVMouseDelta old=FNVLookTo(&classic,x,y,3),now=FNVTouchRelative(&carry,packets[i][0],packets[i][1],0,0,packets[i][2],3,3,3,3,.002,1,1,0,0);if(old.dx!=now.dx||old.dy!=now.dy)equal=0;}
+    check("direct swipe exactly matches classic Aim 3x across fractional packets and frame times",equal);
+    carry=(FNVTouchVector){0};FNVMouseDelta direct=FNVTouchRelative(&carry,300,0,0,0,.2,3,3,3,3,.002,1,1,0,0);
+    check("fast 300-point swipe retains all 900 counts beyond the controller turn cap",direct.dx==900&&direct.dy==0);
+    carry=(FNVTouchVector){0};int gyroCounts=0;
+    for(unsigned i=0;i<120;i++){FNVMouseDelta delta=FNVTouchRelative(&carry,0,0,1,0,1.0/120,3,3,3,3,.002,1,1,0,0);gyroCounts+=delta.dx;}
+    check("gyro 3x produces three camera radians per device radian independent of sample rate",abs(gyroCounts-1500)<=1);
+    carry=(FNVTouchVector){0};direct=FNVTouchRelative(&carry,10,0,-.6,0,.1,3,3,1,1,.002,1,1,0,0);
+    check("opposite gyro and swipe combine before relative-count quantization",direct.dx==0);
+    carry=(FNVTouchVector){0};direct=FNVTouchRelative(&carry,10,0,.1,0,.1,3,3,3,3,.002,2,.5,0,0);
+    check("common and aiming multipliers apply equally to swipe and gyro",direct.dx==45);
+    carry=(FNVTouchVector){0};direct=FNVTouchRelative(&carry,0,0,1,0,.1,3,3,3,3,.004,1,1,0,0);
+    check("gyro calibration follows the live game's mouse sensitivity",direct.dx==75);
+    carry=(FNVTouchVector){.4,-.4};direct=FNVTouchRelative(&carry,0,0,0,0,.016,3,3,3,3,.002,1,1,0,0);
+    check("fractional camera carry cannot rotate a stationary view",direct.dx==0&&direct.dy==0);
+    FNVTouchVector filtered=FNVTouchSmooth((FNVTouchVector){0},20,10,.016,.025);
+    check("optional smoothing preserves the first swipe's full distance",fabs(hypot(filtered.x,filtered.y)-hypot(20,10))<1e-9);
+    filtered=FNVTouchSmooth(filtered,10,20,.016,.025);
+    check("direction smoothing preserves subsequent swipe distance",fabs(hypot(filtered.x,filtered.y)-hypot(10,20))<1e-9);
+    filtered=FNVTouchSmooth(filtered,0,0,.016,.025);check("smoothing stops immediately without a rotation tail",filtered.x==0&&filtered.y==0);
+    filtered=FNVTouchSmooth((FNVTouchVector){20,0},-20,0,.016,.12);check("reversing a swipe never turns in the previous direction",filtered.x==-20&&filtered.y==0);
     a=FNVTouchMove(1,1,54,.1,1);check("floating movement deadzone",a.x==0&&a.y==0);a=FNVTouchMove(200,-200,54,.1,1);check("radial movement saturation",fabs(hypot(a.x,a.y)-1)<1e-9);
     const FNVTouchRect safe[]={{62,8,832,395},{8,8,552,304},{8,8,1008,740}};
     int valid=1;for(unsigned i=0;i<3;i++)for(unsigned j=0;j<4;j++){FNVTouchRect r=FNVTouchPlace(safe[i],j&1?1:0,j&2?1:0,140);if(r.x<safe[i].x||r.y<safe[i].y||r.x+r.w>safe[i].x+safe[i].w||r.y+r.h>safe[i].y+safe[i].h)valid=0;}check("normalized layouts fit safe areas and rotations",valid);

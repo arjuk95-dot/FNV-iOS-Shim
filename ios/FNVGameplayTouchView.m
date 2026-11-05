@@ -53,6 +53,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     CGFloat _radialRadius;
     double _lastFrame,_lookDX,_lookDY,_smoothX,_smoothY,_gyroRateX,_gyroRateY,_gyroSampleAt,_biasX,_biasY,_calibrateUntil,_biasSumX,_biasSumY;
     FNVLook _probeLook;
+    FNVTouchVector _relativeCarry;
     unsigned _biasSamples;
     uint32_t _inputEpoch;
     FNVInputContext _context;
@@ -68,7 +69,8 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     _settings=FNVTouchLoadSettings(NSUserDefaults.standardUserDefaults);
     _context=fnv_pad_context();_inputEpoch=fnv_pad_input_epoch();
 #ifndef FNV_PROBE
-    fnv_pad_stick_camera(1);
+    fnv_pad_stick_camera(![_settings[@"cameraDirect"] boolValue]);
+    fprintf(stderr,"[touch-camera] direct=%d swipe=%.2f,%.2f gyro=%.2f,%.2f multiplier=%.2f\n",[_settings[@"cameraDirect"] boolValue],[_settings[@"swipeX"] doubleValue],[_settings[@"swipeY"] doubleValue],[_settings[@"gyroX"] doubleValue],[_settings[@"gyroY"] doubleValue],[_settings[@"lookMultiplier"] doubleValue]);
     _motion=[CMMotionManager new];_motion.deviceMotionUpdateInterval=1.0/120.0;
     [self updateMotion];
 #endif
@@ -224,7 +226,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
 - (void)pulseMask:(unsigned)mask duration:(double)duration {[_pulses addObject:@{@"mask":@(mask),@"until":@(CACurrentMediaTime()+duration)}];}
 - (void)pulseAxis:(NSString *)axis value:(double)value {[_pulses addObject:@{@"axis":axis,@"value":@(value),@"until":@(CACurrentMediaTime()+.12)}];}
 - (void)localReset {
-    [_fingers removeAllObjects];[_pulses removeAllObjects];_aimed=NO;_lookDX=_lookDY=_smoothX=_smoothY=0;_probeLook=(FNVLook){0};_recoveryStarted=0;
+    [_fingers removeAllObjects];[_pulses removeAllObjects];_aimed=NO;_lookDX=_lookDY=_smoothX=_smoothY=0;_probeLook=(FNVLook){0};_relativeCarry=(FNVTouchVector){0};_recoveryStarted=0;
 }
 - (void)resetTouches {
     [self localReset];_overlay=0;_radialArmed=NO;
@@ -374,7 +376,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
         _lastOrientation=orientation;
     }
     [self updateMotion];
-    [self readPhysicalController];uint32_t epoch=fnv_pad_input_epoch();FNVInputContext context=fnv_pad_context();
+    [self readPhysicalController];fnv_pad_stick_camera(![_settings[@"cameraDirect"] boolValue]);uint32_t epoch=fnv_pad_input_epoch();FNVInputContext context=fnv_pad_context();
     if(epoch!=_inputEpoch||context!=_context){[self localReset];_inputEpoch=epoch;_context=context;_overlay=0;[self setNeedsLayout];}
     if(_calibrateUntil){if(now<_calibrateUntil){_biasSumX+=_gyroRateX;_biasSumY+=_gyroRateY;_biasSamples++;}else{if(_biasSamples){_biasX=_biasSumX/_biasSamples;_biasY=_biasSumY/_biasSamples;}_calibrateUntil=0;}}
     if(_recoveryStarted&&now-_recoveryStarted>1.2){_recoveryStarted=0;[self openEditor];}
@@ -396,18 +398,25 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
         }
         BOOL aim=_aimed||([_settings[@"aimHold"] boolValue]&&holdingAim);if(aim&&[self isGame])[self addCode:fnv_pad_binding(6) state:&state];
         if([self isGame]){
-            double smooth=FNVNumber(_settings,@"smoothing",.025,0,.12),alpha=dt/(smooth+dt);
-            _smoothX=_lookDX?(_smoothX+(_lookDX-_smoothX)*alpha):0;_smoothY=_lookDY?(_smoothY+(_lookDY-_smoothY)*alpha):0;
+            FNVTouchVector filtered=FNVTouchSmooth((FNVTouchVector){_smoothX,_smoothY},_lookDX,_lookDY,dt,FNVNumber(_settings,@"smoothing",0,0,.12));
+            _smoothX=filtered.x;_smoothY=filtered.y;
             double gx=0,gy=0;
             if([_settings[@"gyro"] boolValue]&&(![_settings[@"gyroAiming"] boolValue]||aim)&&!_calibrateUntil&&now-_gyroSampleAt<.15){
                 gx=_gyroRateX-_biasX;gy=_gyroRateY-_biasY;if(fabs(gx)<.018)gx=0;if(fabs(gy)<.018)gy=0;
-                gx*=57.2958*FNVNumber(_settings,@"gyroX",1,.1,5)*([_settings[@"gyroInvertX"] boolValue]?-1:1);gy*=57.2958*FNVNumber(_settings,@"gyroY",1,.1,5)*([_settings[@"gyroInvertY"] boolValue]?-1:1);
+                gx*=[_settings[@"gyroInvertX"] boolValue]?-1:1;gy*=[_settings[@"gyroInvertY"] boolValue]?-1:1;
             }
-            double ads=aim?FNVNumber(_settings,@"ads",.62,.1,2):1;
-            FNVTouchVector look=FNVTouchStick(_smoothX,_smoothY,gx,gy,dt,FNVNumber(_settings,@"lookX",.2,.02,2)*ads,FNVNumber(_settings,@"lookY",.2,.02,2)*ads,FNVNumber(_settings,@"maxTurnRate",360,60,1000),FNVNumber(_settings,@"stickDeadzone",.24,0,.5),FNVNumber(_settings,@"stickResponse",1.6,.4,3),[_settings[@"invertX"] boolValue],[_settings[@"invertY"] boolValue]);
+            double ads=aim?FNVNumber(_settings,@"ads",1,.1,4):1,multiplier=FNVNumber(_settings,@"lookMultiplier",1,.25,10);
+            if([_settings[@"cameraDirect"] boolValue]){
+                FNVMouseDelta delta=FNVTouchRelative(&_relativeCarry,_smoothX,_smoothY,gx,gy,dt,FNVNumber(_settings,@"swipeX",3,.25,12),FNVNumber(_settings,@"swipeY",3,.25,12),FNVNumber(_settings,@"gyroX",3,.1,20),FNVNumber(_settings,@"gyroY",3,.1,20),fnv_pad_mouse_radians(),multiplier,ads,[_settings[@"invertX"] boolValue],[_settings[@"invertY"] boolValue]);
 #ifndef FNV_PROBE
-            state.rx=(int16_t)lround(look.x*32767);state.ry=(int16_t)lround(look.y*32767);
+                if(delta.dx||delta.dy)fnv_pad_mouse_move(delta.dx,delta.dy);
 #endif
+            }else{
+                FNVTouchVector look=FNVTouchStick(_smoothX,_smoothY,gx*57.2958*FNVNumber(_settings,@"gyroX",3,.1,20)*multiplier*ads,gy*57.2958*FNVNumber(_settings,@"gyroY",3,.1,20)*multiplier*ads,dt,FNVNumber(_settings,@"lookX",.2,.02,4)*multiplier*ads,FNVNumber(_settings,@"lookY",.2,.02,4)*multiplier*ads,FNVNumber(_settings,@"maxTurnRate",171.887,60,1000),FNVNumber(_settings,@"stickDeadzone",.265175,0,.5),FNVNumber(_settings,@"stickResponse",2,.4,3),[_settings[@"invertX"] boolValue],[_settings[@"invertY"] boolValue]);
+#ifndef FNV_PROBE
+                state.rx=(int16_t)lround(look.x*32767);state.ry=(int16_t)lround(look.y*32767);
+#endif
+            }
         }else if(_lookDX||_lookDY){
             double x=FNVTouchClamp(_lookDX/fmax(.001,dt)/600,-1,1),y=FNVTouchClamp(-_lookDY/fmax(.001,dt)/600,-1,1);
             if(_context==FNVContextVATS||_context==FNVContextMinigame||_context==FNVContextLockpick){state.rx=(int16_t)lround(x*32767);state.ry=(int16_t)lround(y*32767);}else{state.lx=(int16_t)lround(x*32767);state.ly=(int16_t)lround(y*32767);}
@@ -465,7 +474,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     __weak FNVGameplayTouchView *weak=self;_editorReturn=[self editorButton:@"Settings" rect:CGRectZero handler:^{FNVGameplayTouchView *view=weak;if(!view)return;view->_editorPreview=NO;view->_editorPanel.hidden=NO;view->_editorReturn.hidden=YES;[view setNeedsDisplay];}];_editorReturn.backgroundColor=[UIColor colorWithWhite:.03 alpha:.95];_editorReturn.hidden=YES;[self addSubview:_editorReturn];[self setNeedsLayout];[self layoutIfNeeded];[self rebuildEditor];
 }
 - (void)closeEditorApply:(BOOL)apply {
-    if(apply){_settings[@"version"]=@3;[NSUserDefaults.standardUserDefaults setObject:_settings forKey:FNVTouchSettingsKey];}
+    if(apply){_settings[@"version"]=@4;[NSUserDefaults.standardUserDefaults setObject:_settings forKey:FNVTouchSettingsKey];}
     else if(_beforeEdit)_settings=_beforeEdit;
     _beforeEdit=nil;_editing=NO;[_editorPanel removeFromSuperview];[_editorReturn removeFromSuperview];_editorPanel=nil;_editorReturn=nil;[self resetTouches];[self setNeedsLayout];
 }
@@ -508,14 +517,19 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     y=[self editorSlider:@"Movement dead zone" target:_settings key:@"moveDeadzone" low:0 high:.5 y:y];
     y=[self editorSlider:@"Movement response" target:_settings key:@"moveResponse" low:.4 high:3 y:y];
     y=[self editorHeading:@"Swipe look and aim" at:y];
-    y=[self editorSlider:@"Horizontal sensitivity" target:_settings key:@"lookX" low:.02 high:2 y:y];y=[self editorSlider:@"Vertical sensitivity" target:_settings key:@"lookY" low:.02 high:2 y:y];
-    y=[self editorSlider:@"Aiming sensitivity multiplier" target:_settings key:@"ads" low:.1 high:2 y:y];y=[self editorSlider:@"Fire-drag sensitivity" target:_settings key:@"fireGain" low:.2 high:3 y:y];
+    y=[self editorSwitch:@"Direct swipe look (classic response)" target:_settings key:@"cameraDirect" y:y];
+    y=[self editorSlider:@"Horizontal swipe sensitivity" target:_settings key:@"swipeX" low:.25 high:12 y:y];y=[self editorSlider:@"Vertical swipe sensitivity" target:_settings key:@"swipeY" low:.25 high:12 y:y];
+    y=[self editorSlider:@"Look multiplier (swipe + gyro)" target:_settings key:@"lookMultiplier" low:.25 high:10 y:y];
+    y=[self editorSlider:@"Aiming multiplier (swipe + gyro)" target:_settings key:@"ads" low:.1 high:4 y:y];y=[self editorSlider:@"Fire-drag sensitivity" target:_settings key:@"fireGain" low:.2 high:3 y:y];
     y=[self editorSwitch:@"Invert horizontal swipe" target:_settings key:@"invertX" y:y];y=[self editorSwitch:@"Invert vertical swipe" target:_settings key:@"invertY" y:y];
-    y=[self editorSlider:@"Smoothing" target:_settings key:@"smoothing" low:0 high:.12 y:y];y=[self editorSlider:@"Stick dead-zone calibration" target:_settings key:@"stickDeadzone" low:0 high:.5 y:y];y=[self editorSlider:@"Stick response calibration" target:_settings key:@"stickResponse" low:.4 high:3 y:y];y=[self editorSlider:@"Maximum turn-rate calibration" target:_settings key:@"maxTurnRate" low:60 high:1000 y:y];
+    y=[self editorSlider:@"Direction smoothing" target:_settings key:@"smoothing" low:0 high:.12 y:y];
+    y=[self editorHeading:@"Controller response (Direct off)" at:y];
+    y=[self editorSlider:@"Horizontal controller gain" target:_settings key:@"lookX" low:.02 high:4 y:y];y=[self editorSlider:@"Vertical controller gain" target:_settings key:@"lookY" low:.02 high:4 y:y];
+    y=[self editorSlider:@"Stick dead-zone calibration" target:_settings key:@"stickDeadzone" low:0 high:.5 y:y];y=[self editorSlider:@"Stick response calibration" target:_settings key:@"stickResponse" low:.4 high:3 y:y];y=[self editorSlider:@"Maximum turn-rate calibration" target:_settings key:@"maxTurnRate" low:60 high:1000 y:y];
     y=[self editorSwitch:@"Hold Aim / melee block (off: toggle)" target:_settings key:@"aimHold" y:y];
     y=[self editorHeading:@"Gyroscope" at:y];
     y=[self editorSwitch:@"Enable gyro" target:_settings key:@"gyro" y:y];y=[self editorSwitch:@"Only while aiming (off: always in gameplay)" target:_settings key:@"gyroAiming" y:y];
-    y=[self editorSlider:@"Gyro horizontal sensitivity" target:_settings key:@"gyroX" low:.1 high:5 y:y];y=[self editorSlider:@"Gyro vertical sensitivity" target:_settings key:@"gyroY" low:.1 high:5 y:y];y=[self editorSwitch:@"Invert horizontal gyro" target:_settings key:@"gyroInvertX" y:y];y=[self editorSwitch:@"Invert vertical gyro" target:_settings key:@"gyroInvertY" y:y];
+    y=[self editorSlider:@"Gyro horizontal multiplier" target:_settings key:@"gyroX" low:.1 high:20 y:y];y=[self editorSlider:@"Gyro vertical multiplier" target:_settings key:@"gyroY" low:.1 high:20 y:y];y=[self editorSwitch:@"Invert horizontal gyro" target:_settings key:@"gyroInvertX" y:y];y=[self editorSwitch:@"Invert vertical gyro" target:_settings key:@"gyroInvertY" y:y];
     UIButton *calibrate=[self editorButton:@"Calibrate / Recenter gyro" rect:CGRectMake(10,y,w-20,36) handler:^{[weak calibrate];}];[_editorPanel addSubview:calibrate];y+=44;
     y=[self editorHeading:@"Utility radial" at:y];y=[self editorSlider:@"Hold threshold (seconds)" target:_settings key:@"hold" low:.22 high:.8 y:y];
     NSArray *radialLabels=@[@"Reload",@"Crouch",@"Weapons",@"Change ammo",@"Camera view",@"Gyro On/Off",@"More"];

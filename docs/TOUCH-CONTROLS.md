@@ -34,11 +34,33 @@ if the Pip-Boy button has been hidden.
 Gyro starts disabled when no preference exists. Its radial toggle and preferences
 persist. The editor offers aiming-only or always-in-gameplay behavior, horizontal
 and vertical sensitivity/inversion, and calibration/recentering. Keep the phone
-still during calibration. Gyro and touch are combined before right-stick clamping;
-turn-rate overflow is discarded rather than queued as unwanted rotation.
+still during calibration. Gyro and touch are combined before relative-count
+quantization in Direct mode. Controller response combines them before stick
+clamping and discards overflow rather than queuing unwanted rotation.
 
-Settings use the versioned `FNVTouchControls.v3` preference and safe-area-relative
+Settings use the versioned `FNVTouchControls.v4` preference and safe-area-relative
 positions. They do not edit game INIs or saves.
+
+## Classic swipe and gyro baseline
+
+Direct swipe look defaults to the previous **Aim 3x** response: each UIKit point
+produces three relative mouse counts. This retains the full distance of a fast
+swipe instead of imposing the original game's controller turn-rate limit.
+Movement, actions, menu controls and physical controllers continue to use XInput.
+The four existing verified camera-only compatibility sites select the relative
+path for touch; an active physical controller retains its original camera path.
+
+Gyro defaults to a 3x camera/device rotation ratio before the game's own zoom.
+Its counts are calibrated from the live original mouse sensitivity. The common
+Look multiplier and the Aiming multiplier affect both swipe and gyro; per-axis
+gyro multipliers extend to 20x. Existing custom gyro values, inversion, layouts
+and controller calibration are preserved on migration. Old default smoothing is
+removed; optional direction smoothing preserves distance and stops immediately.
+
+Direct swipe can be disabled for controller-style response. Its calibration
+controls are grouped separately. Touch camera motion has independent ownership;
+menus, cancellation, backgrounding and controller takeover clear its pending
+state and buffered events while retaining input from other sources.
 
 ## Context controls
 
