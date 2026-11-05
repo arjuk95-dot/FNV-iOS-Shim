@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import plistlib
+import shutil
 import struct
 import subprocess
 
@@ -27,4 +28,13 @@ def compile_icon(work,app):
     info=plistlib.loads(partial.read_bytes())
     assert info['CFBundleIcons']['CFBundlePrimaryIcon']['CFBundleIconName']=='AppIcon'
     assert (app/'Assets.car').is_file() and (app/'Assets.car').stat().st_size>0
-    return {key:value for key,value in info.items() if key in ['CFBundleIcons','CFBundleIcons~ipad']}
+    # Modern actool keeps some sizes in Assets.car. Supply loose high-density
+    # renditions too, for guest-container icon readers that inspect PNG files.
+    for pixels,name in [(120,'AppIcon60x60@2x.png'),(180,'AppIcon60x60@3x.png'),(152,'AppIcon76x76@2x~ipad.png'),(167,'AppIcon83.5x83.5@2x~ipad.png')]:
+        if not (app/name).exists():
+            subprocess.run(['sips','--resampleHeightWidth',str(pixels),str(pixels),str(icons/'AppIcon1024.png'),'--out',str(app/name)],check=True)
+    ipad=info['CFBundleIcons~ipad']['CFBundlePrimaryIcon']['CFBundleIconFiles']
+    if 'AppIcon83.5x83.5' not in ipad:ipad.append('AppIcon83.5x83.5')
+    shutil.copyfile(icons/'AppIcon1024.png',app/'AppIcon.png')
+    info['CFBundleIconFile']='AppIcon.png'
+    return {key:value for key,value in info.items() if key in ['CFBundleIcons','CFBundleIcons~ipad','CFBundleIconFile']}

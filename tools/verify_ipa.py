@@ -34,6 +34,15 @@ def verify(path, target):
         mode = exe_info.external_attr >> 16
         assert stat.S_ISREG(mode) and mode & 0o111, 'Executable ZIP mode missing'
         binary = archive.read(exe_info)
+        icon_verified=False
+        if target=='game' and 'CFBundleIcons' in info:
+            assert info['CFBundleIcons']['CFBundlePrimaryIcon']['CFBundleIconName']=='AppIcon'
+            assert info['CFBundleIcons~ipad']['CFBundlePrimaryIcon']['CFBundleIconName']=='AppIcon'
+            icon=archive.read(prefix+info['CFBundleIconFile'])
+            assert icon[:8]==b'\x89PNG\r\n\x1a\n' and struct.unpack_from('>II',icon,16)==(1024,1024)
+            for name in ['AppIcon60x60@2x.png','AppIcon60x60@3x.png','AppIcon76x76@2x~ipad.png','AppIcon83.5x83.5@2x~ipad.png','Assets.car']:
+                assert archive.getinfo(prefix+name).file_size>0
+            icon_verified=True
     magic, cpu, subtype, filetype, ncmds, sizeofcmds, flags, reserved = struct.unpack_from('<8I', binary)
     assert magic == 0xFEEDFACF, 'Expected thin little-endian Mach-O 64'
     assert cpu == 0x0100000C and filetype == 2, 'Expected arm64 executable'
@@ -60,7 +69,7 @@ def verify(path, target):
                 bytes=path.stat().st_size, bundle_id=info['CFBundleIdentifier'], architecture='arm64',
                 platform='iPhoneOS', executable_mode=oct(mode & 0o777), zip_members=len(entries),
                 dylibs=frameworks, unsigned=True, executable_sha256=info.get('FNVExecutableSHA256'),
-                build_source_commit=info.get('FNVBuildSourceCommit'), build_version=info.get('CFBundleVersion'))
+                build_source_commit=info.get('FNVBuildSourceCommit'), build_version=info.get('CFBundleVersion'),app_icon_verified=icon_verified)
 
 
 def main():
