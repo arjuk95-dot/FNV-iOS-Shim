@@ -40,7 +40,9 @@ def main():
     p.add_argument('--state-probes',default='[]',help='bounded numeric entry/receiver-field diagnostic specification')
     p.add_argument('--codec-prefix',type=Path,help='verified pinned iOS Ogg/Vorbis static libraries')
     p.add_argument('--hybrid-input',default='[]',help='verified camera-only call-site profile')
+    p.add_argument('--version',default=os.environ.get('GITHUB_RUN_NUMBER','1'),help='positive numeric app build version, independent of the build repository run counter')
     args = p.parse_args()
+    if not args.version.isdecimal() or not 0<int(args.version)<=2147483647:p.error('--version must be a positive 32-bit integer')
     probes=normalize(args.state_probes)
     hybrid=hybrid_input.normalize(args.hybrid_input,args.exe)
     matched_hybrid=set()
@@ -119,7 +121,7 @@ def main():
         run(base+objects+libraries+[v for f in frameworks for v in ('-framework',f)]+['-o',str(app/name)])
         if codec:shutil.copytree(codec/'licenses',app/'Licenses')
         info=dict(CFBundleDevelopmentRegion='en',CFBundleExecutable=name,CFBundleName=name,CFBundleDisplayName=name,
-                  CFBundleIdentifier='dev.fnvshim.'+args.target,CFBundlePackageType='APPL',CFBundleVersion=os.environ.get('GITHUB_RUN_NUMBER','1'),
+                  CFBundleIdentifier='dev.fnvshim.'+args.target,CFBundlePackageType='APPL',CFBundleVersion=args.version,
                   CFBundleShortVersionString='0.1',CFBundleInfoDictionaryVersion='6.0',MinimumOSVersion='18.0',
                   CFBundleSupportedPlatforms=['iPhoneOS'],UIDeviceFamily=[1,2],LSRequiresIPhoneOS=True,
                   UIFileSharingEnabled=True,LSSupportsOpeningDocumentsInPlace=True,UILaunchScreen={},

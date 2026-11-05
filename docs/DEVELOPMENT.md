@@ -59,3 +59,11 @@ need a phone run.
 Release notes record the source revision, executable identity, IPA checksum,
 validation results and remaining device checks. Keep private build-input uploads
 temporary, and preserve the user's game files, saves and preferences during updates.
+
+The executable and generated-source build inputs require a **private build
+repository**. The game workflow checks repository visibility before downloading
+them. A public source/release repository can be mirrored to a separate private
+build repository at the same commit. Set `build_version` explicitly there and
+fetch the pinned public codecs using `codecs_repository`. Publish the verified
+IPA and checksums to the public release; keep input archives and object artifacts
+private.

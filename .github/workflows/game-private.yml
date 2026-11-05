@@ -38,6 +38,16 @@ on:
         required: false
         default: '41685697032'
         type: string
+      codecs_repository:
+        description: Repository containing the pinned public codec artifacts and cache
+        required: false
+        default: 'arjunyerevan95-dot/FNV-iOS-Shim'
+        type: string
+      build_version:
+        description: Optional numeric app build number independent of this repository run counter
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
   actions: read
@@ -54,6 +64,8 @@ jobs:
       STATE_PROBES: ${{ inputs.state_probes }}
       HYBRID_INPUT: ${{ inputs.hybrid_input }}
       CODECS_RUN_ID: ${{ inputs.codecs_run_id }}
+      CODECS_REPOSITORY: ${{ inputs.codecs_repository }}
+      BUILD_VERSION: ${{ inputs.build_version }}
     steps:
       - uses: actions/checkout@v4
       - name: Require private repository
@@ -67,12 +79,12 @@ jobs:
       - name: Compile and link translated game
         run: |
           case "$CODECS_RUN_ID" in ''|*[!0-9]*) exit 1;; esac
-          python3 tools/fetch_codecs.py ios --run "$CODECS_RUN_ID" --out build/codecs-ios
+          python3 tools/fetch_codecs.py ios --run "$CODECS_RUN_ID" --repo "$CODECS_REPOSITORY" --out build/codecs-ios
           if [ -n "$CACHE_RUN_ID" ]; then
             case "$CACHE_RUN_ID" in *[!0-9]*) exit 1;; esac
             gh run download "$CACHE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name FNV-ios-objects-private --dir build/ios-objects
           fi
-          python3 tools/build.py game --generated "$RUNNER_TEMP/fnv-private/generated" --exe "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --jobs 2 --cache build/ios-objects --state-probes "$STATE_PROBES" --codec-prefix build/codecs-ios --hybrid-input "$HYBRID_INPUT"
+          python3 tools/build.py game --generated "$RUNNER_TEMP/fnv-private/generated" --exe "$RUNNER_TEMP/fnv-private/FalloutNV.exe" --jobs 2 --cache build/ios-objects --state-probes "$STATE_PROBES" --codec-prefix build/codecs-ios --hybrid-input "$HYBRID_INPUT" --version "${BUILD_VERSION:-$GITHUB_RUN_NUMBER}"
       - name: Verify game IPA
         run: python3 tools/verify_ipa.py build/FNVGame.ipa --target game --receipt build/game-validation.json
       - uses: actions/upload-artifact@v4

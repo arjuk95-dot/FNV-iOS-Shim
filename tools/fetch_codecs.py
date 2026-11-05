@@ -15,14 +15,14 @@ PRESERVED_SHA={
     'macos':'e7e444cc6c2d02b1ee50b82be447738cec5f494adcfdafdb5e99cca3aa71be07',
 }
 
-def fetch(run,platform,destination):
+def fetch(run,platform,destination,repository=None):
     if not run.isdigit():raise ValueError('Numeric codec run ID required')
     destination=Path(destination).resolve()
     if destination.exists():
         validate(destination,platform)
         return destination
     destination.parent.mkdir(parents=True,exist_ok=True)
-    repo=os.environ.get('GITHUB_REPOSITORY','arjunyerevan95-dot/FNV-iOS-Shim')
+    repo=repository or os.environ.get('GITHUB_REPOSITORY','arjunyerevan95-dot/FNV-iOS-Shim')
     with tempfile.TemporaryDirectory(prefix='fnv-codecs-',dir=destination.parent) as directory:
         work=Path(directory).resolve()
         assert work.is_relative_to(destination.parent)
@@ -56,5 +56,6 @@ if __name__=='__main__':
     parser.add_argument('platform',choices=['ios','macos'])
     parser.add_argument('--run',default='41685697032')
     parser.add_argument('--out',type=Path,required=True)
+    parser.add_argument('--repo',help='repository containing the pinned public codecs when using a separate private build repository')
     args=parser.parse_args()
-    print(fetch(args.run,args.platform,args.out),flush=True)
+    print(fetch(args.run,args.platform,args.out,args.repo),flush=True)
