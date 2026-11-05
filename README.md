@@ -1,80 +1,116 @@
-# Fallout New Vegas · iPhone host shim
+<p align="center">
+  <img src="docs/assets/fnv-icon.png" width="144" alt="FNV iOS ranger helmet icon">
+</p>
 
-A source port of the public Apple Silicon host that keeps its D3D9-to-Metal renderer and Win32 compatibility layer. The iPhone supplies a UIKit window, app lifecycle, a movable guest address space and native relative touch input. This is an experimental bring-your-own-game build kit with a hardware probe and separate game target. The owner confirms that build 7 reaches the menu, loads New Game and supports movement/look when the engine's existing background NavMesh setting is disabled. That build lacks audio/video output and uses the original controls. The current candidate implements native PCM/Vorbis audio, cached native movie playback, phone-aspect rendering and hybrid swipe/XInput controls. Those additions pass desktop tests but still require phone acceptance.
+# Fallout: New Vegas for iOS
 
-## Try the hardware probe first
+**A touch optimized port of Fallout: New Vegas that runs locally on your iPhone.**
 
-On a Mac with Xcode 16 or newer selected and an iPhoneOS SDK, unzip the kit and run from its root:
+Explore the Mojave using your own PC copy of the game, with controls designed for
+the touchscreen: floating movement, swipe aiming, dedicated combat buttons,
+optional gyro aiming, and layouts you can customize in the app.
 
-    python3 tools/build.py probe
+This is an unofficial, experimental port. The original game runs through a native
+ARM64 runtime with Metal graphics, alongside an iOS interface for touch controls.
 
-Output is build/FNVShimProbe.ipa, packaged for a device and ready for personal signing. From Windows, you can instead put the extracted kit's contents at the root of a new GitHub repository (keep the .github folder), open Actions → Build iPhone shim probe → Run workflow, and download the IPA artifact if the build succeeds. The workflow needs no commercial game files. Use SideStore to sign and install the probe on the iPhone. LiveContainer probe compatibility has been tested on the owner's installation; this is separate from gameplay acceptance.
+**[Download a test release](https://github.com/arjunyerevan95-dot/FNV-iOS-Shim/releases)**
+· **[Installation guide](docs/INSTALL.md)**
+· **[Touch controls](docs/TOUCH-CONTROLS.md)**
 
-A successful device run should show a colored field. Drag on the right to vary red and green. Lift and re-touch elsewhere and the colors should stay put until you move. Deflect the left thumb to vary blue independently. These changes go through the original host's simulated COM device, Clear and Present, using the Metal backend on iOS. The left stick is polled through the XInput shim. This is a graphics and input check, with no game code. An allocation failure or untranslated game entry is a diagnostic result; see the app's Documents/fnv.log. The probe only touches a small fraction of the requested 4 GiB virtual region.
+## Made for touch
 
-## Build with a privately owned game
+- **Floating movement:** place your left thumb anywhere in the movement region;
+  lift it to stop and hide the stick.
+- **Classic swipe look:** the default restores the earlier 3× aiming response,
+  preserving the distance of fast swipes. Drag on Fire to adjust aim while shooting.
+- **Six core actions:** Fire, Aim, Interact, Jump, VATS and Pip-Boy stay within reach.
+- **Aim your way:** toggle or hold Aim, slide from Aim onto Fire, and adjust the
+  shared look multiplier, aiming multiplier and separate horizontal/vertical gains.
+- **Optional gyro:** aiming-only or always during gameplay, with calibration,
+  inversion and a wider sensitivity range. Gyro stays off in game menus.
+- **Utilities without clutter:** hold Pip-Boy for reload, crouch, weapon hotkeys,
+  ammunition, camera view, gyro and More.
+- **Editable layouts:** move, resize, fade or hide controls; adjust the movement
+  and navigation regions; keep separate gameplay and Pip-Boy layouts.
 
-Use the unencrypted 32-bit PC executable and Data directory from the same installation. The developer's earlier Mac gameplay report is a reference. This kit uses source-level shims and requires compiling the translated units for the iPhone SDK.
+Pip-Boy, dialogue, looting and VATS use contextual controls. Physical-controller
+input is retained alongside the touch interface. The [controls guide](docs/TOUCH-CONTROLS.md)
+explains the bindings, editor, map controls and recovery gesture.
 
-1. Obtain the upstream static recompiler at commit ff8e0d791e3e1f0148a2245c12c7706855e66926. Set up Ghidra 12 and the upstream Python environment. Keep all work derived from the executable outside any public repository.
-2. For a first translation on the Mac, use these commands with the paths set to your local values. Create a fresh Ghidra project in a writable folder. Existing full-game C generated for this exact executable is also a suitable input. Existing Mac object files cannot go into the iPhone link.
+## What you need
 
-        mkdir -p "$WORK/ghidra" "$WORK/generated"
-        "$HEADLESS" "$WORK/ghidra" fnv -import "$EXE"
-        "$HEADLESS" "$WORK/ghidra" fnv -process "$(basename "$EXE")" -noanalysis -readOnly -scriptPath "$RECOMP/ghidra_scripts" -postScript DumpPcode.java "$WORK/all.jsonl" all
-        python3 tools/translate/emit.py "$WORK/all.jsonl" "$WORK/generated"
+- **iOS 18 or later.** Current device validation is on the project owner's iPhone;
+  broader iPhone and iPad coverage is still being tested.
+- **A working LiveContainer installation** or another compatible personal signing
+  setup. The downloadable IPA is unsigned. Start with the
+  [official LiveContainer installation guide](https://livecontainer.github.io/docs/installation/).
+- **Your own matching PC installation of Fallout: New Vegas.** Release notes list
+  the supported executable identity. The game files and prepared movie files are
+  supplied separately from your installation.
+- Space for the full game, local movie files and saves. The tested game-content
+  installation occupies approximately 10 GB before extra mods.
 
-   The basic import/export commands do not repair incomplete analysis. Follow [the maintained emitter and analysis recipe](tools/translate/README.md), including no-return/fall-through and typed computed-target analysis, before relying on a whole-game generation. Preserve the original upstream checkout. Entry counts alone do not validate behavior.
+## Install and play
 
-3. In the kit directory run:
+1. Download the game IPA from a release and import it into LiveContainer.
+2. Launch once to create the game's folders.
+3. Copy your matching executable, Data folder and configuration files into
+   `Documents/FalloutNV` inside **FNVGame's own data container**. The installation
+   guide shows the layout and the movie-file preparation step.
+4. Relaunch FNVGame, load a save or start New Game, and use the touch overlay to play.
 
-        python3 tools/build_codecs.py ios --out "$WORK/codecs-ios"
-        python3 tools/build.py game --generated "$WORK/generated" --exe "$EXE" --codec-prefix "$WORK/codecs-ios/prefix" --hybrid-input "$CAMERA_PROFILE_JSON"
+**Updating an existing installation:** update the existing FNVGame entry and keep
+its data container. Your game files, saves and settings stay there; they do not
+need to be copied again. Back up your saves before updating.
 
-   Output on a successful link is build/FNVGame.ipa. The builder validates pinned Ogg/Vorbis platform, architecture, source commits and file hashes, and bundles BSD licenses. It records the executable's SHA-256 for launch-time matching. Use the very same executable for translation, packaging and installation. Keep executable-specific camera profiles private. They contain a small JSON list of site/callee pairs: original CALL identity, generated callee and exact site coverage are checked before building. The game IPA contains code generated from your copy; keep it private.
-4. Sideload the game IPA, launch once, then use Files to place your installation under the app's Documents/FalloutNV folder (FalloutNV.exe, Data, and game INI files). Relaunch. Keep existing saves backed up separately. Look for the first failing guest address in Documents/fnv.log if boot stops.
-5. Test reaching the title screen, loading an interior, crossing into Goodsprings, firing while strafing, and a save/reload across a cold launch. The success criterion for this port is the game completing that sequence on the target phone.
+## Current progress
 
-## Input and platform details
+The following have been exercised on the owner's iPhone:
 
-The game now exposes virtual XInput controller zero: analog left stick, ABXY, shoulders, triggers, D-pad, menu/back and stick clicks. The right side sends relative mouse displacement with fractional carry; stationary/re-touched fingers do not move the camera. An explicit, verified camera-only compatibility profile selects mouse displacement/scaling while movement/buttons remain controller-driven. The old analog-input.flag is no longer required. The on-screen Aim control cycles swipe sensitivity. App suspension releases all touches and pad states and pauses native media. Physical controllers and gyro remain outside this revision.
+- Doc Mitchell's introduction, including the Vigor Tester and couch sequence,
+  followed by gameplay in Goodsprings.
+- Dialogue, music, effects, menu sounds, gunfire and intro movie picture/audio.
+- Interior/exterior scene changes, saving, loading and reloading after a cold launch.
+- Character cast shadows and actor self-shadowing with the documented settings.
 
-The phone's landscape native aspect determines its preferred render resolution (long edge capped at1440). Adapter modes, Win32 metrics and generated display preference keys use that size. Existing FalloutPrefs.ini is backed up once. DirectSound PCM is mixed through AVAudioEngine; Vorbis native decoding uses marshalled 32-bit guest callbacks. Positional audio currently supplies stereo output, without a spatial renderer. Bink movie playback requires an owner-local NativeMedia/<movie-basename>.mp4 cache converted from the matching original movie. Originals remain under Data/Video; video frames return through the game's texture path. No decoder JIT or FFmpeg binary is included in the IPA. Missing caches and failed native decodes are logged explicitly.
+Classic swipe/gyro refinements, the app icon and Pip-Boy navigation changes are
+being delivered through test releases. Each release states its native-check results
+and remaining phone-test steps. Controller/minigame coverage, performance across
+devices, extended sessions and mod combinations remain active development areas.
 
-The host also initializes `Display/sD3DDevice` from the same adapter description returned by Direct3D. The game's original startup comparison otherwise requests its Windows launcher after shutting down the shared pathfinding workers. Continuing without that launcher leaves NPC path requests queued behind stopped workers. Preparing the matching identity before startup preserves normal worker initialization. Other preferences and the existing synchronous NavMesh setting are retained; quest stages, NPC positions and saves are not patched.
+## Controls at a glance
 
-The game loop runs on a worker thread. UIKit owns the main thread and the CAMetalLayer. The host requests 4 GiB of contiguous virtual space at an OS-selected base and uses 32-bit guest offsets. Phone build 7 has exercised archive loading, the menu and a loaded scene with movement/look; extended gameplay and memory stability remain unverified. Three 192 MiB renderer buffers remain an on-device memory concern in the game target. The diagnostic uses smaller buffers. The no-JIT build deliberately traps on missing translated entries, preserving the reason, target and guest caller. Use demonstrated patterns to improve static analysis and regenerate; a Mac-only Unicorn reference is available for discovery. The exercised startup paths use native static translation on iOS.
+| Action | Touch input |
+| --- | --- |
+| Move | Floating left stick |
+| Look | Swipe the open right region; Fire also supports drag-to-look |
+| Aim / block | Aim button; toggle and hold modes are available |
+| Fire / attack | Hold Fire |
+| Interact / jump | Dedicated buttons |
+| Open Pip-Boy | Tap Pip-Boy |
+| Utilities | Hold Pip-Boy, then slide and release on a sector |
+| Edit controls | Utilities → More → Customize Controls |
+| Recover the editor | Hold four fingers for 1.2 seconds |
 
-`FNV_TRACE_SYNC` enables periodic Present snapshots of worker/wait states, guest wait callers and recent entry history captured by each owning thread. Entry history is not a reconstructed call stack. Threads blocked before their first guest entry and pure guest loops without API boundaries require additional evidence. `FNV_TRACE_FILES` records requested/resolved paths and open errors. Both are enabled in the current game app for the loading investigation. File shims resolve existing path components case-insensitively to match Windows on the phone's case-sensitive storage.
+Local utility wheels and the editor leave the game running. Use the game menu when
+you need to pause.
 
-## Repeat the host checks
+## If something goes wrong
 
-For a runtime stop immediately after a returning guest helper, check the matching
-Ghidra database for an incorrect no-return annotation and undecoded continuation.
-`tools/ghidra/RepairCallContinuations.java` audits or repairs direct-call
-continuations for explicitly supplied callee addresses. It requires an actual
-RET in each selected callee's body, stays within the chosen code block, and
-preserves existing instructions and defined data. Run `audit .text <callee>`
-first, then `apply .text <callee>` on the private project before exporting again.
-Keep executable-specific addresses and exported code outside this repository.
+Keep the current run open and copy `Documents/fnv.log` from FNVGame's data container
+before launching again. Include the build number, device/iOS version, loaded save
+or location, what happened and the shortest sequence that reproduces it.
 
-    bash tests/run.sh
+For missing files, executable mismatch, movie setup and shadow settings, see the
+[installation guide](docs/INSTALL.md). For tuning or layout issues, see
+[touch controls](docs/TOUCH-CONTROLS.md).
 
-On a Mac, `python3 tests/file_shims_case_test.py` exercises real file APIs on a case-sensitive APFS fixture. `python3 tests/sync_shims_test.py` compares actual pthread/wait behavior against the recorded pre-repair module, including wait-all signal consumption, explicit thread completion, suspended creation/resume, timeout boundaries and diagnostic snapshots. Neither test supplies original game assets or establishes gameplay success.
+## Development and credits
 
-The media workflow runs actual PCM/DirectSound ABI, native Vorbis guest callbacks, DirectShow pull-source playback, Bink ABI, authored H264 pixel decoding and hybrid input/display checks, then compiles the public iPhoneOS host and links the macOS host. Media fixtures are authored test data. Speaker playback and touch quality require the phone.
+Build instructions and test entry points are in [DEVELOPMENT.md](docs/DEVELOPMENT.md).
+Use the source tag attached to a release when reproducing that build.
 
-DirectShow supports both native file playback and the game's custom source-filter path. `AddFilter` retains the guest source; `Render(IPin)` reads its standard `IAsyncReader` interface with the original 32-bit COM calling convention and decodes the resulting audio natively. Callback CPU and exception-list state are restored, and the final graph release drops its retained sources. The regression runs the actual graph against an authored pull reader and compares it with the historical success-only filter methods.
-
-`python3 tests/display_preferences_test.py --reference` exercises the historical preference initializer against the actual Direct3D adapter identifier and Win32 profile reader, asserting the missing/stale identity failures. Without `--reference`, the same integration checks exercise the current initializer and verify unrelated settings, native aspect and repeated-launch stability.
-
-The suite checks touch math against upstream input.c and runs a synthetic guest call sequence using the real COM table builder, gamepad state, guest heap, device creation, clear and present. It asserts the merged swipe and analog values at the renderer boundary for three frames using a headless backend. The iPhone probe uses the real Metal backend for the same call sequence.
-
-## Sources and changes
-
-The upstream snapshot is included under its MIT license in upstream/LICENSE. Selected host files are adapted for iOS. Recompiler and game data are external inputs. The Direct3D9 ABI table was regenerated from the public MinGW-w64 declarations using tools/d3d_table.py. The generated table contains interface slot names and x86 stack argument widths. Reference header file SHA-256 is 4fd5b2e4340046f31cfb5cc0c3f276074a205b8daf0a76583e4f3819a5f4deaf.
-
-- Host and recompiler https://github.com/thetheoryofR/Fallout-NV-MacOS/tree/ff8e0d791e3e1f0148a2245c12c7706855e66926
-- Interface declarations https://github.com/mingw-w64/mingw-w64/blob/master/mingw-w64-headers/include/d3d9.h
-- macOS-to-iOS shim precedent https://github.com/zorrobyte/macos-on-ios-public
-- Steam decompilation for mapping input and runtime behavior https://github.com/momusdigital/fnv_decomp
+This project builds on [Fallout-NV-MacOS](https://github.com/thetheoryofR/Fallout-NV-MacOS)
+and its public host/recompiler work. The original host's license is retained in
+[upstream/LICENSE](upstream/LICENSE); Ogg/Vorbis notices are included in the IPA.
+Fallout: New Vegas and its original content belong to their respective owners.
