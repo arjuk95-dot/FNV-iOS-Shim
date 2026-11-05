@@ -27,6 +27,8 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
 - (void)drawMore:(CGContextRef)cg;
 - (void)dragSelectionBy:(CGPoint)delta;
 - (void)updateMotion;
+- (void)closeEditorApply:(BOOL)apply;
+- (void)toggleStandardController:(UITapGestureRecognizer *)recognizer;
 @end
 
 @interface FNVTouchDisplayProxy : NSObject
@@ -41,14 +43,16 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     NSMutableDictionary<NSValue *,FNVFinger *> *_fingers;
     NSMutableArray<NSDictionary *> *_pulses;
     NSMutableDictionary *_settings,*_beforeEdit;
+    NSMutableArray *_fallbackButtons;
     CADisplayLink *_displayLink;
     CMMotionManager *_motion;
-    CGRect _safe,_frames[10],_moveRegion,_lookRegion;
+    CGRect _safe,_frames[FNVTouchFallbackCount],_moveRegion,_lookRegion;
     CGSize _lastSize;
     UIEdgeInsets _lastInsets;
     UIInterfaceOrientation _lastOrientation;
     NSInteger _count,_overlay,_radialSelection,_selected,_editorSlot;
     BOOL _aimed,_radialArmed,_editing,_editingPip,_editorPreview,_suspended,_reportedCamera;
+    BOOL _standardFallback;
     CGPoint _radialOrigin,_radialStart;
     CGFloat _radialRadius;
     double _lastFrame,_lookDX,_lookDY,_smoothX,_smoothY,_gyroRateX,_gyroRateY,_gyroSampleAt,_biasX,_biasY,_calibrateUntil,_biasSumX,_biasSumY;
@@ -67,6 +71,11 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     self.multipleTouchEnabled=YES;self.opaque=NO;self.backgroundColor=UIColor.clearColor;
     _lookGain=1;_movementRadius=54;_fingers=[NSMutableDictionary new];_pulses=[NSMutableArray new];
     _settings=FNVTouchLoadSettings(NSUserDefaults.standardUserDefaults);
+    _fallbackButtons=[NSMutableArray new];for(unsigned i=0;i<FNVTouchFallbackCount;i++)[_fallbackButtons addObject:[@{@"visible":@YES,@"label":@YES,@"opacity":@1} mutableCopy]];
+    UITapGestureRecognizer *fallback=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleStandardController:)];
+    fallback.numberOfTouchesRequired=3;fallback.numberOfTapsRequired=2;
+    fallback.cancelsTouchesInView=YES;fallback.delaysTouchesBegan=NO;fallback.delaysTouchesEnded=NO;
+    [self addGestureRecognizer:fallback];
     _context=fnv_pad_context();_inputEpoch=fnv_pad_input_epoch();
 #ifndef FNV_PROBE
     fnv_pad_stick_camera(![_settings[@"cameraDirect"] boolValue]);
@@ -82,22 +91,24 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
 }
 - (void)dealloc {[_displayLink invalidate];[_motion stopDeviceMotionUpdates];[NSNotificationCenter.defaultCenter removeObserver:self];}
 - (UIColor *)amber:(CGFloat)alpha{return[UIColor colorWithRed:1 green:.73 blue:.25 alpha:alpha];}
-- (BOOL)isGame {return _editing?!_editingPip:_context==FNVContextGameplay;}
-- (NSMutableArray *)buttonSettings {return _settings[[self isGame]?@"gameButtons":@"pipButtons"];}
+- (BOOL)isGame {return !_standardFallback&&(_editing?!_editingPip:_context==FNVContextGameplay);}
+- (NSMutableArray *)buttonSettings {return _standardFallback?_fallbackButtons:_settings[[self isGame]?@"gameButtons":@"pipButtons"];}
 - (NSArray<NSString *> *)buttonNames {
+    if(_standardFallback)return @[@"LT",@"LB",@"Back",@"Start",@"RB",@"RT",@"↑",@"↓",@"←",@"→",@"A",@"B",@"X",@"Y",@"L3",@"R3"];
     if([self isGame])return @[@"Fire",@"Aim",@"Interact",@"Jump",@"VATS",@"Pip-Boy"];
     if(_context==FNVContextVATS&&!_editing)return @[@"Queue",@"Target",@"Confirm",@"Cancel",@"Special X",@"Special Y",@"Body ↑",@"Body ↓",@"Body ←",@"Body →"];
     if(_context==FNVContextPipMap&&!_editing)return @[@"Next section",@"Prev section",@"Select / Travel",@"Back / Close",@"Place marker",@"Action Y",@"Zoom +",@"Zoom −",@"Previous tab",@"Next tab"];
     if(_context==FNVContextLockpick&&!_editing)return @[@"",@"",@"",@"Exit",@"Force lock",@"",@"",@"",@"",@""];
-    if(_context!=FNVContextPipBoy&&!_editing)return @[@"",@"",@"Confirm",@"Back",@"X action",@"Y action",@"Up",@"Down",@"Left",@"Right"];
+    if(_context!=FNVContextPipBoy&&!_editing)return @[@"RT / Next",@"LT / Previous",@"Confirm",@"Back",@"X action",@"Y action",@"Up",@"Down",@"Left",@"Right"];
     return @[@"Next section",@"Prev section",@"Use / Confirm",@"Back / Close",@"Action X",@"Action Y",@"Up",@"Down",@"Left",@"Right"];
 }
 - (BOOL)buttonAvailable:(NSInteger)index {
+    if(_standardFallback)return index>=0&&index<FNVTouchFallbackCount;
     if(_editing||[self isGame])return YES;
     if(_context==FNVContextLockpick)return index==3||index==4;
     if(_context==FNVContextHacking||_context==FNVContextComputer||_context==FNVContextDialogue)return index==2||index==3||index>=6;
     if(fnv_context_is_pip(_context)||_context==FNVContextVATS)return YES;
-    return index>=2;
+    return YES;
 }
 - (FNVTouchRect)policySafe{return(FNVTouchRect){_safe.origin.x,_safe.origin.y,_safe.size.width,_safe.size.height};}
 - (CGRect)region:(NSString *)key {
@@ -111,15 +122,16 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     _lastSize=size;_lastInsets=insets;
     _safe=UIEdgeInsetsInsetRect(self.bounds,UIEdgeInsetsMake(insets.top+8,insets.left+8,insets.bottom+8,insets.right+8));
     if(_safe.size.width<44||_safe.size.height<44)return;
-    NSArray *buttons=[self buttonSettings];_count=MIN((NSInteger)buttons.count,10);
+    NSArray *buttons=[self buttonSettings];_count=MIN((NSInteger)buttons.count,FNVTouchFallbackCount);
 #ifdef FNV_PROBE
     _count=0;
 #endif
     for(NSInteger i=0;i<_count;i++){
-        NSDictionary *b=buttons[i];FNVTouchRect r=FNVTouchPlace([self policySafe],FNVNumber(b,@"x",.8,0,1),FNVNumber(b,@"y",.6,0,1),FNVNumber(b,@"size",54,20,140));
+        NSDictionary *b=buttons[i];FNVTouchRect r=_standardFallback?FNVTouchFallbackFrame([self policySafe],(unsigned)i):FNVTouchPlace([self policySafe],FNVNumber(b,@"x",.8,0,1),FNVNumber(b,@"y",.6,0,1),FNVNumber(b,@"size",54,20,140));
         _frames[i]=CGRectMake(r.x,r.y,r.w,r.h);
     }
     _moveRegion=CGRectIntersection(_safe,[self region:[self isGame]?@"move":@"pipMove"]);_lookRegion=CGRectIntersection(_safe,[self region:[self isGame]?@"look":@"pipLook"]);
+    if(_standardFallback){FNVTouchRect left=FNVTouchFallbackRegion([self policySafe],0),right=FNVTouchFallbackRegion([self policySafe],1);_moveRegion=CGRectMake(left.x,left.y,left.w,left.h);_lookRegion=CGRectMake(right.x,right.y,right.w,right.h);}
     _radialRadius=MIN(FNVNumber(_settings,@"radialSize",250,200,380)/2,MIN(_safe.size.width,_safe.size.height)/2-4);
     _radialOrigin=CGPointMake(FNVTouchClamp(_safe.origin.x+FNVNumber(_settings,@"radialX",.72,0,1)*_safe.size.width,CGRectGetMinX(_safe)+_radialRadius,CGRectGetMaxX(_safe)-_radialRadius),FNVTouchClamp(_safe.origin.y+FNVNumber(_settings,@"radialY",.43,0,1)*_safe.size.height,CGRectGetMinY(_safe)+_radialRadius,CGRectGetMaxY(_safe)-_radialRadius));
     if(_editing){
@@ -138,7 +150,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     NSArray *settings=[self buttonSettings],*names=[self buttonNames];
     for(NSInteger i=0;i<_count;i++){
         NSDictionary *b=settings[i];if((![b[@"visible"] boolValue]&&!_editing)||![self buttonAvailable:i])continue;
-        CGFloat opacity=FNVNumber(_settings,@"opacity",.72,.15,1)*FNVNumber(b,@"opacity",1,.1,1)*(_overlay?.28:1);
+        CGFloat opacity=(_standardFallback?.82:FNVNumber(_settings,@"opacity",.72,.15,1))*FNVNumber(b,@"opacity",1,.1,1)*(_overlay?.28:1);
         BOOL selected=(_editing&&_selected==i)||([self isGame]&&i==1&&_aimed);
         UIColor *fill=selected?[self amber:.18*opacity]:[UIColor colorWithWhite:0 alpha:.13*opacity];
         CGContextSetFillColorWithColor(cg,fill.CGColor);CGContextFillEllipseInRect(cg,_frames[i]);
@@ -152,10 +164,19 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
             if(label||!icon)[self text:names[i] rect:CGRectMake(_frames[i].origin.x+2,CGRectGetMidY(_frames[i])+(icon?8:-8),_frames[i].size.width-4,30) size:MIN(12,_frames[i].size.width/4) color:[self amber:opacity]];
         }
     }
-    for(FNVFinger *finger in _fingers.allValues)if(finger.state.owner==FNVTouchMoveOwner||(finger.state.owner==FNVTouchMenuOwner&&FNVTouchRightStickContext(_context))){
+    if(_standardFallback){
+        [self text:@"Standard XInput · Three-finger double-tap to return" rect:CGRectMake(_safe.origin.x+70,_safe.origin.y+_safe.size.height*.19,_safe.size.width-140,25) size:12 color:[self amber:.95]];
+        for(unsigned right=0;right<2;right++){CGRect region=right?_lookRegion:_moveRegion;CGPoint origin=CGPointMake(CGRectGetMidX(region),CGRectGetMidY(region));BOOL held=NO;
+            for(FNVFinger *finger in _fingers.allValues)if(finger.state.owner==(right?FNVTouchMenuOwner:FNVTouchMoveOwner)){held=YES;break;}
+            [self text:right?@"Right stick":@"Left stick" rect:CGRectMake(region.origin.x,region.origin.y,region.size.width,22) size:11 color:[self amber:.8]];
+            if(!held){double radius=FNVTouchFallbackRadius([self policySafe]);CGContextSetStrokeColorWithColor(cg,[self amber:.4].CGColor);CGContextSetLineWidth(cg,1);CGContextStrokeEllipseInRect(cg,CGRectMake(origin.x-radius,origin.y-radius,radius*2,radius*2));}
+        }
+    }
+    for(FNVFinger *finger in _fingers.allValues)if(finger.state.owner==FNVTouchMoveOwner||(finger.state.owner==FNVTouchMenuOwner&&(_standardFallback||FNVTouchRightStickContext(_context)))){
         double radius=FNVNumber(_settings,@"radius",54,20,120),dx=finger.state.lastX-finger.origin.x;
-        if(_context==FNVContextPipMap&&finger.state.owner==FNVTouchMoveOwner)dx=0;
-        FNVTouchVector v=FNVTouchMove(dx,finger.state.lastY-finger.origin.y,radius,FNVNumber(_settings,@"moveDeadzone",.1,0,.5),FNVNumber(_settings,@"moveResponse",1,.4,3));
+        if(_standardFallback)radius=FNVTouchFallbackRadius([self policySafe]);
+        if(!_standardFallback&&_context==FNVContextPipMap&&finger.state.owner==FNVTouchMoveOwner)dx=0;
+        FNVTouchVector v=FNVTouchMove(dx,finger.state.lastY-finger.origin.y,radius,_standardFallback?.1:FNVNumber(_settings,@"moveDeadzone",.1,0,.5),_standardFallback?1:FNVNumber(_settings,@"moveResponse",1,.4,3));
         double opacity=FNVNumber(_settings,@"opacity",.72,.15,1);
         CGContextSetStrokeColorWithColor(cg,[self amber:.75*opacity].CGColor);CGContextSetLineWidth(cg,1);
         CGContextStrokeEllipseInRect(cg,CGRectMake(finger.origin.x-radius,finger.origin.y-radius,radius*2,radius*2));
@@ -171,8 +192,8 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     if(_overlay==1||_overlay==2)[self drawRadial:cg];
     if(_overlay==3)[self drawMore:cg];
     if(_calibrateUntil>CACurrentMediaTime())[self text:@"Hold still — calibrating gyro" rect:CGRectMake(_safe.origin.x,_safe.origin.y+45,_safe.size.width,24) size:14 color:[self amber:1]];
-    if(_context==FNVContextLockpick&&!_editing)[self text:@"Left thumb: pick angle     Right swipe: turn lock" rect:CGRectMake(_safe.origin.x+80,_safe.origin.y+10,_safe.size.width-160,30) size:12 color:[self amber:.9]];
-    if(_context==FNVContextPipMap&&!_editing)[self text:@"Left thumb: zoom     Right thumb: move map     Select: travel" rect:CGRectMake(_safe.origin.x+80,_safe.origin.y+10,_safe.size.width-160,30) size:12 color:[self amber:.9]];
+    if(_context==FNVContextLockpick&&!_editing&&!_standardFallback)[self text:@"Left thumb: pick angle     Right swipe: turn lock" rect:CGRectMake(_safe.origin.x+80,_safe.origin.y+10,_safe.size.width-160,30) size:12 color:[self amber:.9]];
+    if(_context==FNVContextPipMap&&!_editing&&!_standardFallback)[self text:@"Left thumb: zoom     Right thumb: move map     Select: travel" rect:CGRectMake(_safe.origin.x+80,_safe.origin.y+10,_safe.size.width-160,30) size:12 color:[self amber:.9]];
 }
 - (NSArray *)radialNames {
     if(_overlay==2)return @[@"Hotkey 1 ↖",@"Hotkey 3 ↗",@"Hotkey 4 ←",@"Hotkey 5 →",@"Hotkey 6 ↙",@"Hotkey 7 ↓",@"Hotkey 8 ↘"];
@@ -212,7 +233,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     NSArray *names=[self moreNames];for(NSInteger i=0;i<(NSInteger)names.count;i++){CGRect row=[self moreItem:i];CGContextStrokeRect(cg,row);[self text:names[i] rect:CGRectInset(row,4,8) size:13 color:[self amber:1]];}
 }
 - (NSInteger)hitButton:(CGPoint)p {
-    FNVTouchRect frames[10];int visible[10];NSArray *buttons=[self buttonSettings];
+    FNVTouchRect frames[FNVTouchFallbackCount];int visible[FNVTouchFallbackCount];NSArray *buttons=[self buttonSettings];
     for(NSInteger i=0;i<_count;i++){CGRect r=_frames[i];frames[i]=(FNVTouchRect){r.origin.x,r.origin.y,r.size.width,r.size.height};visible[i]=(_editing||[buttons[i][@"visible"] boolValue])&&[self buttonAvailable:i];}
     return FNVTouchHit(frames,visible,(size_t)_count,p.x,p.y);
 }
@@ -235,6 +256,14 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     [self localReset];_overlay=0;_radialArmed=NO;
     fnv_pad_reset();_inputEpoch=fnv_pad_input_epoch();if(self.movementChanged)self.movementChanged(0,0);[self setNeedsDisplay];
 }
+- (void)toggleStandardController:(UITapGestureRecognizer *)recognizer {
+    if(recognizer&&recognizer.state!=UIGestureRecognizerStateRecognized)return;
+    if(_editing)[self closeEditorApply:NO];
+    [self resetTouches];_standardFallback=!_standardFallback;
+    fnv_pad_stick_camera(_standardFallback||![_settings[@"cameraDirect"] boolValue]);_inputEpoch=fnv_pad_input_epoch();
+    fprintf(stderr,"[touch-overlay] standard_xinput=%d context=%u\n",_standardFallback,_context);
+    [self updateMotion];[self setNeedsLayout];[self layoutIfNeeded];[self setNeedsDisplay];
+}
 - (void)willResign:(NSNotification *)notification {_suspended=YES;[self resetTouches];[_motion stopDeviceMotionUpdates];_gyroRateX=_gyroRateY=0;_gyroSampleAt=0;}
 - (void)didResume:(NSNotification *)notification {_suspended=NO;_lastFrame=0;_gyroRateX=_gyroRateY=0;_gyroSampleAt=0;[self resetTouches];}
 - (void)openOverlay:(NSInteger)kind origin:(CGPoint)point {
@@ -246,7 +275,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
 }
 - (void)updateMotion {
 #ifndef FNV_PROBE
-    BOOL wanted=!_suspended&&([_settings[@"gyro"] boolValue]||_calibrateUntil>CACurrentMediaTime());
+    BOOL wanted=!_suspended&&!_standardFallback&&([_settings[@"gyro"] boolValue]||_calibrateUntil>CACurrentMediaTime());
     if(!wanted){if(_motion.deviceMotionActive)[_motion stopDeviceMotionUpdates];_gyroRateX=_gyroRateY=0;return;}
     if(_motion.deviceMotionActive||!_motion.deviceMotionAvailable)return;
     __weak FNVGameplayTouchView *weakSelf=self;
@@ -296,6 +325,9 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
         else if(_overlay){owner=FNVTouchOverlayOwner;
             if(_overlay==3){finger.action=-1;for(NSInteger i=0;i<7;i++)if(CGRectContainsPoint([self moreItem:i],p)){finger.action=i;break;}}
             else {_radialArmed=YES;_radialSelection=FNVTouchSector(p.x-_radialOrigin.x,p.y-_radialOrigin.y,_radialRadius*.24,_radialRadius,7);}
+        }else if(_standardFallback){
+            if(hit>=0)owner=FNVTouchFallbackOwner;
+            else if(CGRectContainsPoint(_moveRegion,p)||CGRectContainsPoint(_lookRegion,p)){int wanted=CGRectContainsPoint(_moveRegion,p)?FNVTouchMoveOwner:FNVTouchMenuOwner;BOOL held=NO;for(FNVFinger *old in _fingers.allValues)if(old.state.owner==wanted)held=YES;if(!held)owner=wanted;}
         }else if([self isGame]){
             if(hit==0)owner=FNVTouchFireOwner;
             else if(hit==1){owner=FNVTouchAimOwner;finger.aimWasOn=_aimed;if(![_settings[@"aimHold"] boolValue])_aimed=YES;}
@@ -326,7 +358,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
         FNVTouchFireSlide(&state,[self insideFire:p]);
         if(state.fire)finger.slidToFire=YES;
         if(state.owner==FNVTouchFireOwner||state.fire){double gain=FNVNumber(_settings,@"fireGain",1,.2,3);_lookDX+=dx*gain;_lookDY+=dy*gain;}
-    }else if(state.owner==FNVTouchLookOwner||(state.owner==FNVTouchMenuOwner&&!FNVTouchRightStickContext(_context))){
+    }else if(state.owner==FNVTouchLookOwner||(state.owner==FNVTouchMenuOwner&&!_standardFallback&&!FNVTouchRightStickContext(_context))){
 #ifdef FNV_PROBE
         FNVMouseDelta d=FNVLookTo(&_probeLook,p.x,p.y,self.lookGain);input_mouse_move(d.dx,d.dy);
 #else
@@ -383,7 +415,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
         _lastOrientation=orientation;
     }
     [self updateMotion];
-    [self readPhysicalController];fnv_pad_stick_camera(![_settings[@"cameraDirect"] boolValue]);uint32_t epoch=fnv_pad_input_epoch();FNVInputContext context=fnv_pad_context();
+    [self readPhysicalController];fnv_pad_stick_camera(_standardFallback||![_settings[@"cameraDirect"] boolValue]);uint32_t epoch=fnv_pad_input_epoch();FNVInputContext context=fnv_pad_context();
     if(epoch!=_inputEpoch||context!=_context){[self localReset];_inputEpoch=epoch;_context=context;_overlay=0;[self setNeedsLayout];}
     if(_calibrateUntil){if(now<_calibrateUntil){_biasSumX+=_gyroRateX;_biasSumY+=_gyroRateY;_biasSamples++;}else{if(_biasSamples){_biasX=_biasSumX/_biasSamples;_biasY=_biasSumY/_biasSamples;}_calibrateUntil=0;}}
     if(_recoveryStarted&&now-_recoveryStarted>1.2){_recoveryStarted=0;[self openEditor];}
@@ -395,7 +427,12 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
         }
     }
     FNVPadState state={0};BOOL holdingAim=NO;
-    if(!_overlay){
+    if(_standardFallback){
+        for(FNVFinger *finger in _fingers.allValues){FNVTouchContact c=finger.state;
+            if(c.owner==FNVTouchFallbackOwner&&finger.action>=0&&[self hitButton:CGPointMake(c.lastX,c.lastY)]==finger.action)FNVTouchFallbackButton(&state,(unsigned)finger.action);
+            else if(c.owner==FNVTouchMoveOwner||c.owner==FNVTouchMenuOwner)FNVTouchFallbackStick(&state,c.owner==FNVTouchMenuOwner,c.lastX-finger.origin.x,c.lastY-finger.origin.y,FNVTouchFallbackRadius([self policySafe]));
+        }
+    }else if(!_overlay){
         for(FNVFinger *finger in _fingers.allValues){FNVTouchContact c=finger.state;
             if(c.owner==FNVTouchMoveOwner||(c.owner==FNVTouchMenuOwner&&FNVTouchRightStickContext(_context))){FNVTouchNavigationStick(&state,_context,c.owner==FNVTouchMenuOwner,c.lastX-finger.origin.x,c.lastY-finger.origin.y,FNVNumber(_settings,@"radius",54,20,120),FNVNumber(_settings,@"moveDeadzone",.1,0,.5),FNVNumber(_settings,@"moveResponse",1,.4,3));}
             else if(c.owner==FNVTouchFireOwner&&c.fire)[self addCode:fnv_pad_binding(4) state:&state];
@@ -475,6 +512,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     __weak FNVGameplayTouchView *weak=self;__weak UISwitch *weakToggle=toggle;[toggle addAction:[UIAction actionWithHandler:^(UIAction *action){UISwitch *control=weakToggle;if(!control)return;target[key]=@(control.isOn);[weak setNeedsDisplay];}] forControlEvents:UIControlEventValueChanged];[_editorPanel addSubview:toggle];return y+40;
 }
 - (void)openEditor {
+    _standardFallback=NO;fnv_pad_stick_camera(![_settings[@"cameraDirect"] boolValue]);
     [self resetTouches];if(_editing)return;_beforeEdit=FNVCopySettings(_settings);_settings=FNVCopySettings(_settings);_editing=YES;_editingPip=NO;_editorPreview=NO;_selected=0;
     _editorPanel=[UIScrollView new];_editorPanel.backgroundColor=[UIColor colorWithWhite:.025 alpha:.96];_editorPanel.layer.borderWidth=1;_editorPanel.layer.borderColor=[self amber:.7].CGColor;_editorPanel.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;[self addSubview:_editorPanel];
     __weak FNVGameplayTouchView *weak=self;_editorReturn=[self editorButton:@"Settings" rect:CGRectZero handler:^{FNVGameplayTouchView *view=weak;if(!view)return;view->_editorPreview=NO;view->_editorPanel.hidden=NO;view->_editorReturn.hidden=YES;[view setNeedsDisplay];}];_editorReturn.backgroundColor=[UIColor colorWithWhite:.03 alpha:.95];_editorReturn.hidden=YES;[self addSubview:_editorReturn];[self setNeedsLayout];[self layoutIfNeeded];[self rebuildEditor];

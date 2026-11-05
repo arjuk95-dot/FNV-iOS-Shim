@@ -66,6 +66,27 @@ int main(void){
     FNVTouchRect tiny=FNVTouchPlace(safe[0],1,1,20);check("small icon retains its full hit area inside the safe inset",tiny.x+tiny.w/2+22<=safe[0].x+safe[0].w&&tiny.y+tiny.h/2+22<=safe[0].y+safe[0].h);
     FNVTouchRect region=FNVTouchRegion(safe[0],1,1,.7,.8);check("resized activation region stays fully inside the safe area",region.x>=safe[0].x&&region.y>=safe[0].y&&region.x+region.w<=safe[0].x+safe[0].w&&region.y+region.h<=safe[0].y+safe[0].h);
     check("a third gameplay finger cannot trigger editor recovery",!FNVTouchRecoveryGesture(3)&&FNVTouchRecoveryGesture(4));
+    FNVPadState fallback={0};for(unsigned i=0;i<FNVTouchFallbackCount;i++)FNVTouchFallbackButton(&fallback,i);
+    check("standard controller exposes every XInput digital button and both independent triggers",fallback.buttons==0xf3ff&&fallback.left_trigger==255&&fallback.right_trigger==255);
+    fallback=(FNVPadState){0};FNVTouchFallbackButton(&fallback,FNVTouchFallbackLT);
+    check("fallback LT is an unremapped held left trigger",fallback.left_trigger==255&&fallback.right_trigger==0&&fallback.buttons==0);
+    fallback=(FNVPadState){0};FNVTouchFallbackButton(&fallback,FNVTouchFallbackRT);
+    check("fallback RT is an unremapped held right trigger",fallback.right_trigger==255&&fallback.left_trigger==0&&fallback.buttons==0);
+    fallback=(FNVPadState){0};FNVTouchFallbackStick(&fallback,0,54,-54,54);FNVTouchFallbackStick(&fallback,1,-54,54,54);
+    check("fallback sticks retain both axes without context-specific map zoom constraints",fallback.lx>0&&fallback.ly>0&&fallback.rx<0&&fallback.ry<0);
+    FNVTouchFallbackStick(&fallback,0,0,0,54);FNVTouchFallbackStick(&fallback,1,0,0,54);
+    check("fallback stick release is neutral",fallback.lx==0&&fallback.ly==0&&fallback.rx==0&&fallback.ry==0);
+    int fallbackValid=1;
+    for(unsigned i=0;i<3;i++){
+        FNVTouchRect frames[FNVTouchFallbackCount];
+        for(unsigned j=0;j<FNVTouchFallbackCount;j++){
+            frames[j]=FNVTouchFallbackFrame(safe[i],j);FNVTouchRect r=frames[j];
+            if(r.w<44||r.x<safe[i].x||r.y<safe[i].y||r.x+r.w>safe[i].x+safe[i].w||r.y+r.h>safe[i].y+safe[i].h)fallbackValid=0;
+        }
+        for(unsigned j=0;j<FNVTouchFallbackCount;j++){FNVTouchRect r=frames[j];if(FNVTouchHit(frames,NULL,FNVTouchFallbackCount,r.x+r.w/2,r.y+r.h/2)!=(int)j)fallbackValid=0;}
+        for(int right=0;right<2;right++){FNVTouchRect r=FNVTouchFallbackRegion(safe[i],right);if(r.w<100||r.h<80||r.x<safe[i].x||r.y<safe[i].y||r.x+r.w>safe[i].x+safe[i].w||r.y+r.h>safe[i].y+safe[i].h)fallbackValid=0;}
+    }
+    check("all sixteen emergency controls remain individually reachable in compact phone and tablet safe areas",fallbackValid);
     FNVPadState remapped={0};fnv_pad_apply_binding(&remapped,10);fnv_pad_apply_binding(&remapped,17);check("live binding decoder uses XInput outputs",remapped.buttons==0x1000&&remapped.right_trigger==255);
     printf("%u failure(s)\n",failed);return failed?1:0;
 }

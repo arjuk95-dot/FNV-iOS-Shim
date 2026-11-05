@@ -49,6 +49,14 @@ jobs:
       - run: python3 tests/touch_controls_test.py
       - run: python3 tests/guest_diagnostics_test.py
       - run: python3 tests/touch_settings_test.py
+      - run: python3 tests/touch_overlay_test.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: FNV-touch-overlay-checks
+          path: build/touch-overlay-checks
+          if-no-files-found: ignore
+          retention-days: 3
       - run: python3 tests/app_icon_test.py
       - run: python3 tests/display_preferences_test.py --reference
       - run: python3 tests/display_preferences_test.py

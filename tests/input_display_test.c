@@ -100,6 +100,18 @@ int main(void){
     MEM[0x11f308f+1001]=0;P32(0x31080,33);call(0,(uint32_t[]){0,0x2000},2);check("World Map restores neutral map controls after closing confirmation",fnv_pad_context()==FNVContextPipMap&&G32(0x2004)==0&&G32(0x2008)==0&&G32(0x200c)==0);
     MEM[0x11f308f+1013]=1;fnv_pad_touch_state(&mapInput);call(0,(uint32_t[]){0,0x2000},2);check("pause also overrides an underlying Pip-Boy map",fnv_pad_context()==FNVContextMenu&&G32(0x2008)==0&&G32(0x200c)==0);MEM[0x11f308f+1013]=0;
     P32(0x31080,34);call(0,(uint32_t[]){0,0x2000},2);check("Quests uses regular Pip-Boy controls instead of map-only zoom",fnv_pad_context()==FNVContextPipBoy);MEM[0x11f308f+1023]=0;call(0,(uint32_t[]){0,0x2000},2);
+    fnv_pad_stick_camera(1);c=stickExpected;fnv_input_mouse_camera(&c,0x1234);
+    check("standard fallback retains the original controller camera path",!memcmp(&c,&stickExpected,sizeof c));
+    int rawFallback=1;P32(0x3000c,0);call(0,(uint32_t[]){0,0x2000},2);
+    const uint16_t rawMasks[16]={0,0x100,0x20,0x10,0x200,0,1,2,4,8,0x1000,0x2000,0x4000,0x8000,0x40,0x80};
+    for(unsigned i=0;i<16;i++){
+        FNVPadState raw={0};FNVTouchFallbackButton(&raw,i);FNVTouchFallbackStick(&raw,0,54,0,54);FNVTouchFallbackStick(&raw,1,0,-54,54);fnv_pad_touch_state(&raw);call(0,(uint32_t[]){0,0x2000},2);
+        if((G32(0x2004)&0xffff)!=rawMasks[i]||((G32(0x2004)>>16)&255)!=(i==0?255:0)||(G32(0x2004)>>24)!=(i==5?255:0)||G32(0x2008)!=0x7fff||G32(0x200c)!=0x7fff0000)rawFallback=0;
+    }
+    check("all fallback buttons triggers and two sticks cross the actual XInput ABI despite remapped gameplay bindings",rawFallback);
+    fnv_pad_reset();call(0,(uint32_t[]){0,0x2000},2);check("fallback reset leaves a neutral native controller snapshot",G32(0x2004)==0&&G32(0x2008)==0&&G32(0x200c)==0);
+    P32(0x3000c,1);call(0,(uint32_t[]){0,0x2000},2);fnv_pad_stick_camera(0);c=stickExpected;fnv_input_mouse_camera(&c,0x1234);
+    check("leaving fallback restores classic direct-touch camera selection",REG(&c,R_EAX)==0xaabbcc00);
     fnv_display_configure(1320,2868);check("wide display preserves landscape native aspect within two pixels",fnv_display_width()==1440&&fnv_display_height()==662);
     fnv_display_client(1440,662);check("client dimensions agree with render target",fnv_client_width()==1440&&fnv_client_height()==662);
     fnv_use_analog(0);check("disabled pad reports disconnected",call(0,(uint32_t[]){0,0x2000},2)==1167);

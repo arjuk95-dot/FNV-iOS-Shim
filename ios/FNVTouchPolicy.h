@@ -50,6 +50,32 @@ static inline void FNVTouchNavigationStick(FNVPadState *state,FNVInputContext co
 static inline uint16_t FNVTouchMapButton(unsigned index){
     switch(index){case 2:return 0x1000;case 3:return 0x2000;case 4:return 0x4000;case 5:return 0x8000;case 6:return 0x200;case 7:return 0x100;case 8:return 4;case 9:return 8;default:return 0;}
 }
+// The emergency controller deliberately ignores menu detection and user layouts.
+enum {FNVTouchFallbackCount=16,FNVTouchFallbackLT=0,FNVTouchFallbackRT=5};
+static inline FNVTouchRect FNVTouchFallbackFrame(FNVTouchRect safe,unsigned index){
+    static const double positions[FNVTouchFallbackCount][2]={
+        {.07,.10},{.20,.10},{.44,.10},{.56,.10},{.80,.10},{.93,.10},
+        {.22,.63},{.22,.87},{.15,.75},{.29,.75},
+        {.90,.70},{.97,.55},{.83,.55},{.90,.40},{.07,.90},{.67,.90}};
+    if(index>=FNVTouchFallbackCount)return(FNVTouchRect){0};
+    return FNVTouchPlace(safe,positions[index][0],positions[index][1],FNVTouchClamp(safe.h/8,44,54));
+}
+static inline FNVTouchRect FNVTouchFallbackRegion(FNVTouchRect safe,int right){
+    return FNVTouchRegion(safe,right?.42:.035,right?.35:.24,.33,right?.49:.30);
+}
+static inline double FNVTouchFallbackRadius(FNVTouchRect safe){return FNVTouchClamp(fmin(safe.w*.12,safe.h*.14),28,54);}
+static inline void FNVTouchFallbackButton(FNVPadState *state,unsigned index){
+    static const uint16_t masks[FNVTouchFallbackCount]={0,0x100,0x20,0x10,0x200,0,1,2,4,8,0x1000,0x2000,0x4000,0x8000,0x40,0x80};
+    if(index>=FNVTouchFallbackCount)return;
+    state->buttons|=masks[index];
+    if(index==FNVTouchFallbackLT)state->left_trigger=255;
+    if(index==FNVTouchFallbackRT)state->right_trigger=255;
+}
+static inline void FNVTouchFallbackStick(FNVPadState *state,int right,double dx,double dy,double radius){
+    FNVTouchVector v=FNVTouchMove(dx,dy,radius,.1,1);
+    if(right){state->rx=(int16_t)lround(v.x*32767);state->ry=(int16_t)lround(v.y*32767);}
+    else{state->lx=(int16_t)lround(v.x*32767);state->ly=(int16_t)lround(v.y*32767);}
+}
 // No motion is carried into a later frame. Excess velocity is deliberately
 // discarded at the game's maximum turn rate instead of becoming a turn tail.
 static inline FNVTouchVector FNVTouchStick(double touchX,double touchY,double gyroX,double gyroY,double dt,double gainX,double gainY,double maxRate,double deadzone,double response,int invertX,int invertY){
@@ -93,7 +119,7 @@ static inline int FNVTouchSector(double dx,double dy,double inner,double outer,u
     return(int)(angle/(2*M_PI)*count)%count;
 }
 typedef struct {double startX,startY,lastX,lastY,began;int owner,consumed,fire;} FNVTouchContact;
-enum {FNVTouchNone,FNVTouchMoveOwner,FNVTouchLookOwner,FNVTouchFireOwner,FNVTouchAimOwner,FNVTouchUtilityOwner,FNVTouchActionOwner,FNVTouchOverlayOwner,FNVTouchMenuOwner,FNVTouchEditOwner};
+enum {FNVTouchNone,FNVTouchMoveOwner,FNVTouchLookOwner,FNVTouchFireOwner,FNVTouchAimOwner,FNVTouchUtilityOwner,FNVTouchActionOwner,FNVTouchOverlayOwner,FNVTouchMenuOwner,FNVTouchEditOwner,FNVTouchFallbackOwner};
 static inline FNVTouchContact FNVTouchBegin(int owner,double x,double y,double time){return(FNVTouchContact){x,y,x,y,time,owner,0,owner==FNVTouchFireOwner};}
 static inline int FNVTouchRecognizeHold(FNVTouchContact *c,double now,double threshold){if(c->owner!=FNVTouchUtilityOwner||c->consumed||now-c->began<threshold)return 0;c->consumed=1;return 1;}
 static inline int FNVTouchUtilityTap(const FNVTouchContact *c,double now,double threshold){return c->owner==FNVTouchUtilityOwner&&!c->consumed&&now-c->began<threshold&&hypot(c->lastX-c->startX,c->lastY-c->startY)<24;}
