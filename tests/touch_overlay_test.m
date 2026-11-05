@@ -117,7 +117,10 @@ static void utilityChecks(FNVGameplayTouchView *view,NSString *directory){
     [view openEditor];NSMutableDictionary *before=FNVCopySettings([view valueForKey:@"settings"]);[view assignUtility:FNVUtilityReload radial:NO slot:3];[view closeEditorApply:NO];
     check(@"Cancel restores both utility lists after a cross-menu swap",[[view valueForKey:@"settings"] isEqual:before]);
     [view openEditor];[view assignUtility:FNVUtilityCustomize radial:YES slot:0];[view closeEditorApply:YES];[view radialAction:0];
-    check(@"Customize Controls works when moved directly onto the radial",[[view valueForKey:@"editing"] boolValue]);[view closeEditorApply:NO];
+    panel=[view valueForKey:@"editorPanel"];settings=[view valueForKey:@"settings"];
+    NSDictionary *editorEvidence=@{@"editing_lookup":[view valueForKey:@"editing"],@"editing_ivar":[view valueForKey:@"_editing"],@"radial":settings[@"radialOrder"],@"more":settings[@"moreOrder"],@"panel_visible":@(panel.superview==view&&!panel.hidden),@"overlay":[view valueForKey:@"overlay"]};
+    [[NSJSONSerialization dataWithJSONObject:editorEvidence options:NSJSONWritingPrettyPrinted error:NULL] writeToFile:[directory stringByAppendingPathComponent:@"customize-radial-state.json"] atomically:YES];
+    check(@"Customize Controls works when moved directly onto the radial",panel.superview==view&&!panel.hidden&&[settings[@"radialOrder"][0] intValue]==FNVUtilityCustomize&&[[view valueForKey:@"_editing"] boolValue]);[view closeEditorApply:NO];
     [view openEditor];[view assignUtility:FNVUtilityGyro radial:NO slot:0];[view closeEditorApply:YES];BOOL oldGyro=[[[view valueForKey:@"settings"] objectForKey:@"gyro"] boolValue];[view moreAction:0];
     check(@"Gyro moved to More toggles and persists with an updated label",[[[view valueForKey:@"settings"] objectForKey:@"gyro"] boolValue]!=oldGyro&&[view.moreNames[0] isEqual:oldGyro?@"Gyro OFF":@"Gyro ON"]&&[[NSUserDefaults.standardUserDefaults objectForKey:FNVTouchSettingsKey][@"gyro"] boolValue]!=oldGyro);
     [view openEditor];[view assignUtility:FNVUtilityWeapons radial:NO slot:4];[view closeEditorApply:YES];[view moreAction:4];[view tick:nil];

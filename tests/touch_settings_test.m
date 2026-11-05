@@ -72,7 +72,8 @@ int main(void){@autoreleasepool{
     BOOL allSwaps=YES;
     for(unsigned radial=0;radial<2;radial++)for(NSUInteger slot=0;slot<(radial?7:6);slot++)for(NSUInteger action=0;action<FNVUtilityCount;action++){
         NSMutableDictionary *layout=FNVDefaultSettings(),*beforeSwap=FNVCopySettings(layout);BOOL changed=FNVUtilityAssign(layout,radial,slot,action);
-        if(!FNVUtilityLayoutValid(layout)||(!changed&&![layout isEqual:beforeSwap]))allSwaps=NO;
+        BOOL permitted=radial?(slot!=6||[@[@0,@1,@2,@8,@4,@5,@6] containsObject:@(action)]):action!=FNVUtilityMore;
+        if(changed!=permitted||!FNVUtilityLayoutValid(layout)||(!changed&&![layout isEqual:beforeSwap]))allSwaps=NO;
     }
     check("all 169 slot/action choices keep each utility reachable exactly once",allSwaps);
     before=FNVCopySettings(loaded);
