@@ -29,6 +29,10 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
 - (void)updateMotion;
 - (void)closeEditorApply:(BOOL)apply;
 - (void)toggleStandardController:(UITapGestureRecognizer *)recognizer;
+- (void)performUtility:(NSUInteger)action;
+- (void)assignUtility:(NSUInteger)action radial:(BOOL)radial slot:(NSUInteger)slot;
+- (CGFloat)utilityEditorAt:(CGFloat)y;
+- (NSString *)utilityName:(NSUInteger)action;
 @end
 
 @interface FNVTouchDisplayProxy : NSObject
@@ -53,6 +57,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     NSInteger _count,_overlay,_radialSelection,_selected,_editorSlot;
     BOOL _aimed,_radialArmed,_editing,_editingPip,_editorPreview,_suspended,_reportedCamera;
     BOOL _standardFallback;
+    BOOL _editingUtilities;
     CGPoint _radialOrigin,_radialStart;
     CGFloat _radialRadius;
     double _lastFrame,_lookDX,_lookDY,_smoothX,_smoothY,_gyroRateX,_gyroRateY,_gyroSampleAt,_biasX,_biasY,_calibrateUntil,_biasSumX,_biasSumY;
@@ -206,10 +211,13 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
 }
 - (NSArray *)radialNames {
     if(_overlay==2)return @[@"Hotkey 1 ↖",@"Hotkey 3 ↗",@"Hotkey 4 ←",@"Hotkey 5 →",@"Hotkey 6 ↙",@"Hotkey 7 ↓",@"Hotkey 8 ↘"];
-    NSArray *names=@[@"Reload",@"Crouch",@"Weapons",@"Change ammo",@"Camera view",[_settings[@"gyro"] boolValue]?@"Gyro ON":@"Gyro OFF",@"More"];
     NSMutableArray *ordered=[NSMutableArray new];NSArray *order=_settings[@"radialOrder"];
-    for(unsigned i=0;i<7;i++){NSUInteger index=i<order.count?[order[i] unsignedIntegerValue]:i;[ordered addObject:names[index<7?index:i]];}
+    for(NSNumber *action in order)[ordered addObject:[self utilityName:action.unsignedIntegerValue]];
     return ordered;
+}
+- (NSString *)utilityName:(NSUInteger)action {
+    if(action==FNVUtilityGyro)return [_settings[@"gyro"] boolValue]?@"Gyro ON":@"Gyro OFF";
+    return action<FNVUtilityCount?FNVUtilityNames()[action]:@"";
 }
 - (void)drawRadial:(CGContextRef)cg {
     double radius=_radialRadius,inner=radius*.24;NSArray *names=[self radialNames];
@@ -232,7 +240,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     CGFloat w=MIN(360,_safe.size.width-16),h=MIN(240,_safe.size.height-16);
     return CGRectMake(CGRectGetMaxX(_safe)-w-4,CGRectGetMidY(_safe)-h/2,w,h);
 }
-- (NSArray *)moreNames{return @[@"Customize Controls",@"Holster / Ready",@"Pip-Boy Light",@"Grab / Drop",@"Wait",@"Pause / Menu",@"Back"];}
+- (NSArray *)moreNames {NSMutableArray *names=[NSMutableArray new];for(NSNumber *action in _settings[@"moreOrder"])[names addObject:[self utilityName:action.unsignedIntegerValue]];[names addObject:@"Back"];return names;}
 - (CGRect)moreItem:(NSInteger)item {
     CGRect r=[self moreFrame];CGFloat row=(r.size.height-16)/4,col=(r.size.width-16)/2;
     return item==6?CGRectMake(r.origin.x+8,r.origin.y+8+3*row,r.size.width-16,row):CGRectMake(r.origin.x+8+(item%2)*col,r.origin.y+8+(item/2)*row,col,row);
@@ -296,31 +304,33 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
 #endif
 }
 - (void)radialAction:(NSInteger)sector {
-    if(sector<0)return;
+    if(sector<0||sector>=7)return;
     if(_overlay==2){static const unsigned masks[]={5,9,4,8,6,2,10};[self resetTouches];[self pulseMask:masks[sector] duration:.15];return;}
-    NSArray *order=_settings[@"radialOrder"];unsigned action=(unsigned)(sector<(NSInteger)order.count?[order[sector] unsignedIntegerValue]:sector);
+    NSArray *order=_settings[@"radialOrder"];if(sector>=(NSInteger)order.count)return;
+    [self performUtility:[order[sector] unsignedIntegerValue]];
+}
+- (void)performUtility:(NSUInteger)action {
     [self resetTouches];
     switch(action){
-        case 0:[self pulseAction:7 duration:.12];break;
-        case 1:[self pulseAction:8 duration:.12];break;
-        case 2:_overlay=2;_radialArmed=NO;_radialSelection=-1;break;
-        case 3:[self pulseAction:18 duration:.15];break;
-        case 4:[self pulseAction:13 duration:.12];break;
-        case 5:_settings[@"gyro"]=@(![_settings[@"gyro"] boolValue]);[self persistSettings];if([_settings[@"gyro"] boolValue])[self calibrate];break;
-        case 6:_overlay=3;break;
+        case FNVUtilityReload:[self pulseAction:7 duration:.12];break;
+        case FNVUtilityCrouch:[self pulseAction:8 duration:.12];break;
+        case FNVUtilityWeapons:_overlay=2;_radialArmed=NO;_radialSelection=-1;break;
+        case FNVUtilityAmmo:[self pulseAction:18 duration:.15];break;
+        case FNVUtilityView:[self pulseAction:13 duration:.12];break;
+        case FNVUtilityGyro:_settings[@"gyro"]=@(![_settings[@"gyro"] boolValue]);[self persistSettings];if([_settings[@"gyro"] boolValue])[self calibrate];break;
+        case FNVUtilityMore:_overlay=3;break;
+        case FNVUtilityCustomize:[self openEditor];break;
+        case FNVUtilityHolster:[self pulseAction:7 duration:.85];break;
+        case FNVUtilityLight:[self pulseAction:14 duration:1.0];break;
+        case FNVUtilityGrab:[self pulseAction:27 duration:.65];break;
+        case FNVUtilityWait:[self pulseAction:15 duration:.12];break;
+        case FNVUtilityPause:[self pulseCode:6 duration:.12];break;
     }
 }
 - (void)moreAction:(NSInteger)item {
-    [self resetTouches];
-    switch(item){
-        case 0:[self openEditor];break;
-        case 1:[self pulseAction:7 duration:.85];break;
-        case 2:[self pulseAction:14 duration:1.0];break;
-        case 3:[self pulseAction:27 duration:.65];break;
-        case 4:[self pulseAction:15 duration:.12];break;
-        case 5:[self pulseCode:6 duration:.12];break;
-        case 6:_overlay=1;_radialArmed=NO;_radialSelection=-1;break;
-    }
+    NSArray *order=_settings[@"moreOrder"];
+    if(item>=0&&item<(NSInteger)order.count)[self performUtility:[order[item] unsignedIntegerValue]];
+    else if(item==(NSInteger)order.count){[self resetTouches];_overlay=1;_radialArmed=NO;_radialSelection=-1;}
 }
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     double now=CACurrentMediaTime();
@@ -522,12 +532,12 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
 }
 - (void)openEditor {
     _standardFallback=NO;fnv_pad_stick_camera(![_settings[@"cameraDirect"] boolValue]);
-    [self resetTouches];if(_editing)return;_beforeEdit=FNVCopySettings(_settings);_settings=FNVCopySettings(_settings);_editing=YES;_editingPip=NO;_editorPreview=NO;_selected=0;
+    [self resetTouches];if(_editing)return;_beforeEdit=FNVCopySettings(_settings);_settings=FNVCopySettings(_settings);_editing=YES;_editingPip=NO;_editingUtilities=NO;_editorPreview=NO;_selected=0;
     _editorPanel=[UIScrollView new];_editorPanel.backgroundColor=[UIColor colorWithWhite:.025 alpha:.96];_editorPanel.layer.borderWidth=1;_editorPanel.layer.borderColor=[self amber:.7].CGColor;_editorPanel.keyboardDismissMode=UIScrollViewKeyboardDismissModeOnDrag;[self addSubview:_editorPanel];
-    __weak FNVGameplayTouchView *weak=self;_editorReturn=[self editorButton:@"Settings" rect:CGRectZero handler:^{FNVGameplayTouchView *view=weak;if(!view)return;view->_editorPreview=NO;view->_editorPanel.hidden=NO;view->_editorReturn.hidden=YES;[view setNeedsDisplay];}];_editorReturn.backgroundColor=[UIColor colorWithWhite:.03 alpha:.95];_editorReturn.hidden=YES;[self addSubview:_editorReturn];[self setNeedsLayout];[self layoutIfNeeded];[self rebuildEditor];
+    __weak FNVGameplayTouchView *weak=self;_editorReturn=[self editorButton:@"Settings" rect:CGRectZero handler:^{FNVGameplayTouchView *view=weak;if(!view)return;view->_editorPreview=NO;view->_overlay=0;view->_editorPanel.hidden=NO;view->_editorReturn.hidden=YES;[view setNeedsDisplay];}];_editorReturn.backgroundColor=[UIColor colorWithWhite:.03 alpha:.95];_editorReturn.hidden=YES;[self addSubview:_editorReturn];[self setNeedsLayout];[self layoutIfNeeded];[self rebuildEditor];
 }
 - (void)closeEditorApply:(BOOL)apply {
-    if(apply){_settings[@"version"]=@4;[NSUserDefaults.standardUserDefaults setObject:_settings forKey:FNVTouchSettingsKey];}
+    if(apply){_settings[@"version"]=@5;[NSUserDefaults.standardUserDefaults setObject:_settings forKey:FNVTouchSettingsKey];}
     else if(_beforeEdit)_settings=_beforeEdit;
     _beforeEdit=nil;_editing=NO;[_editorPanel removeFromSuperview];[_editorReturn removeFromSuperview];_editorPanel=nil;_editorReturn=nil;[self resetTouches];[self setNeedsLayout];
 }
@@ -536,16 +546,17 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     if(_selected<count)[self buttonSettings][_selected]=defaults[_editingPip?@"pipButtons":@"gameButtons"][_selected];
     else if(_selected==count)_settings[_editingPip?@"pipMove":@"move"]=defaults[_editingPip?@"pipMove":@"move"];
     else if(_selected==count+1)_settings[_editingPip?@"pipLook":@"look"]=defaults[_editingPip?@"pipLook":@"look"];
-    else for(NSString *key in @[@"radialX",@"radialY",@"radialSize",@"hold",@"radialOrder"])_settings[key]=defaults[key];
+    else for(NSString *key in @[@"radialX",@"radialY",@"radialSize",@"hold",@"radialOrder",@"moreOrder"])_settings[key]=defaults[key];
     [self rebuildEditor];[self setNeedsLayout];
 }
 - (void)rebuildEditor {
     if(!_editing)return;CGPoint offset=_editorPanel.contentOffset;for(UIView *view in _editorPanel.subviews)[view removeFromSuperview];
     CGFloat w=_editorPanel.bounds.size.width,y=8;__weak FNVGameplayTouchView *weak=self;
     NSArray *titles=@[@"Apply",@"Cancel",@"Preview"];
-    for(unsigned i=0;i<3;i++){unsigned action=i;UIButton *button=[self editorButton:titles[i] rect:CGRectMake(8+i*(w-16)/3,y,(w-22)/3,36) handler:^{FNVGameplayTouchView *view=weak;if(!view)return;if(action<2)[view closeEditorApply:action==0];else{view->_editorPreview=YES;view->_editorPanel.hidden=YES;view->_editorReturn.hidden=NO;[view setNeedsDisplay];}}];[_editorPanel addSubview:button];}y+=44;
-    UISegmentedControl *layout=[[UISegmentedControl alloc] initWithItems:@[@"Gameplay",@"Pip-Boy"]];layout.frame=CGRectMake(10,y,w-20,31);layout.selectedSegmentIndex=_editingPip?1:0;layout.selectedSegmentTintColor=[self amber:.7];
-    __weak UISegmentedControl *weakLayout=layout;[layout addAction:[UIAction actionWithHandler:^(UIAction *action){FNVGameplayTouchView *view=weak;UISegmentedControl *control=weakLayout;if(!view||!control)return;view->_editingPip=control.selectedSegmentIndex==1;view->_selected=0;[view setNeedsLayout];[view rebuildEditor];}] forControlEvents:UIControlEventValueChanged];[_editorPanel addSubview:layout];y+=39;
+    for(unsigned i=0;i<3;i++){unsigned action=i;UIButton *button=[self editorButton:titles[i] rect:CGRectMake(8+i*(w-16)/3,y,(w-22)/3,36) handler:^{FNVGameplayTouchView *view=weak;if(!view)return;if(action<2)[view closeEditorApply:action==0];else{view->_editorPreview=YES;view->_editorPanel.hidden=YES;view->_editorReturn.hidden=NO;if(view->_editingUtilities){view->_selected=[view buttonSettings].count+2;view->_overlay=1;}[view setNeedsDisplay];}}];button.accessibilityIdentifier=@[@"editor-apply",@"editor-cancel",@"editor-preview"][i];[_editorPanel addSubview:button];}y+=44;
+    UISegmentedControl *layout=[[UISegmentedControl alloc] initWithItems:@[@"Gameplay",@"Pip-Boy",@"Utilities"]];layout.frame=CGRectMake(10,y,w-20,31);layout.selectedSegmentIndex=_editingUtilities?2:(_editingPip?1:0);layout.selectedSegmentTintColor=[self amber:.7];layout.accessibilityIdentifier=@"editor-layout";
+    __weak UISegmentedControl *weakLayout=layout;[layout addAction:[UIAction actionWithHandler:^(UIAction *action){FNVGameplayTouchView *view=weak;UISegmentedControl *control=weakLayout;if(!view||!control)return;view->_editingPip=control.selectedSegmentIndex==1;view->_editingUtilities=control.selectedSegmentIndex==2;view->_selected=0;view->_editorPanel.contentOffset=CGPointZero;[view setNeedsLayout];[view rebuildEditor];}] forControlEvents:UIControlEventValueChanged];[_editorPanel addSubview:layout];y+=39;
+    if(_editingUtilities){y=[self utilityEditorAt:y];_editorPanel.contentSize=CGSizeMake(w,y);_editorPanel.contentOffset=CGPointMake(0,MIN(offset.y,MAX(0,y-_editorPanel.bounds.size.height)));return;}
     NSArray *targets=[self editorTargets];if(_selected>=(NSInteger)targets.count)_selected=0;
     UIButton *selection=[self editorButton:[NSString stringWithFormat:@"Selected: %@",targets[_selected]] rect:CGRectMake(10,y,w-20,38) handler:^{}];NSMutableArray *items=[NSMutableArray new];
     for(NSUInteger i=0;i<targets.count;i++){NSUInteger index=i;[items addObject:[UIAction actionWithTitle:targets[i] image:nil identifier:nil handler:^(UIAction *action){FNVGameplayTouchView *view=weak;if(!view)return;view->_selected=index;[view rebuildEditor];[view setNeedsDisplay];}]];}
@@ -584,12 +595,42 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     y=[self editorSwitch:@"Enable gyro" target:_settings key:@"gyro" y:y];y=[self editorSwitch:@"Only while aiming (off: always in gameplay)" target:_settings key:@"gyroAiming" y:y];
     y=[self editorSlider:@"Gyro horizontal multiplier" target:_settings key:@"gyroX" low:.1 high:20 y:y];y=[self editorSlider:@"Gyro vertical multiplier" target:_settings key:@"gyroY" low:.1 high:20 y:y];y=[self editorSwitch:@"Invert horizontal gyro" target:_settings key:@"gyroInvertX" y:y];y=[self editorSwitch:@"Invert vertical gyro" target:_settings key:@"gyroInvertY" y:y];
     UIButton *calibrate=[self editorButton:@"Calibrate / Recenter gyro" rect:CGRectMake(10,y,w-20,36) handler:^{[weak calibrate];}];[_editorPanel addSubview:calibrate];y+=44;
-    y=[self editorHeading:@"Utility radial" at:y];y=[self editorSlider:@"Hold threshold (seconds)" target:_settings key:@"hold" low:.22 high:.8 y:y];
-    NSArray *radialLabels=@[@"Reload",@"Crouch",@"Weapons",@"Change ammo",@"Camera view",@"Gyro On/Off",@"More"];
-    for(unsigned slot=0;slot<7;slot++){NSArray *order=_settings[@"radialOrder"];unsigned current=slot<order.count?[order[slot] unsignedIntValue]:slot;if(current>6)current=slot;
-        UIButton *entry=[self editorButton:[NSString stringWithFormat:@"Sector %u: %@",slot+1,radialLabels[current]] rect:CGRectMake(10,y,w-20,34) handler:^{FNVGameplayTouchView *view=weak;if(!view)return;NSMutableArray *order=view->_settings[@"radialOrder"];unsigned old=[order[slot] unsignedIntValue],next=(old+1)%7;NSUInteger other=[order indexOfObject:@(next)];order[slot]=@(next);if(other!=NSNotFound&&other!=slot)order[other]=@(old);[view rebuildEditor];}];[_editorPanel addSubview:entry];y+=39;
-    }
     UIButton *resetLayout=[self editorButton:@"Reset Layout" rect:CGRectMake(10,y,w-20,38) handler:^{FNVGameplayTouchView *view=weak;if(!view)return;NSMutableDictionary *defaults=FNVDefaultSettings();NSString *buttons=view->_editingPip?@"pipButtons":@"gameButtons",*move=view->_editingPip?@"pipMove":@"move",*look=view->_editingPip?@"pipLook":@"look";view->_settings[buttons]=defaults[buttons];view->_settings[move]=defaults[move];view->_settings[look]=defaults[look];[view setNeedsLayout];[view rebuildEditor];}];[_editorPanel addSubview:resetLayout];y+=48;
     _editorPanel.contentSize=CGSizeMake(w,y);_editorPanel.contentOffset=CGPointMake(0,MIN(offset.y,MAX(0,y-_editorPanel.bounds.size.height)));
+}
+- (void)assignUtility:(NSUInteger)action radial:(BOOL)radial slot:(NSUInteger)slot {
+    if(!_editing||!FNVUtilityAssign(_settings,radial,slot,action))return;
+    [self rebuildEditor];[self setNeedsDisplay];
+}
+- (CGFloat)utilityEditorAt:(CGFloat)y {
+    CGFloat w=_editorPanel.bounds.size.width;__weak FNVGameplayTouchView *weak=self;
+    UILabel *hint=[[UILabel alloc] initWithFrame:CGRectMake(10,y,w-20,58)];hint.text=@"Choose an action to swap with this slot. Move actions between Radial and More. More stays on the wheel so every action stays reachable.";hint.numberOfLines=4;hint.font=[UIFont systemFontOfSize:12];hint.textColor=[self amber:.9];[_editorPanel addSubview:hint];y+=64;
+    for(unsigned group=0;group<2;group++){
+        BOOL radial=group==0;NSArray *order=_settings[radial?@"radialOrder":@"moreOrder"];
+        y=[self editorHeading:radial?@"Radial sectors":@"More actions" at:y];
+        for(NSUInteger slot=0;slot<order.count;slot++){
+            NSUInteger current=[order[slot] unsignedIntegerValue];
+            UIButton *entry=[self editorButton:[NSString stringWithFormat:@"%lu: %@",(unsigned long)slot+1,FNVUtilityNames()[current]] rect:CGRectMake(10,y,w-20,36) handler:^{}];
+            entry.accessibilityIdentifier=[NSString stringWithFormat:@"utility-%@-%lu",radial?@"radial":@"more",(unsigned long)slot];
+            NSMutableArray *groups=[NSMutableArray new];
+            for(unsigned source=0;source<2;source++){
+                NSMutableArray *choices=[NSMutableArray new];
+                for(NSNumber *item in _settings[source==0?@"radialOrder":@"moreOrder"]){NSUInteger action=item.unsignedIntegerValue;
+                    UIAction *choice=[UIAction actionWithTitle:FNVUtilityNames()[action] image:nil identifier:nil handler:^(UIAction *sender){[weak assignUtility:action radial:radial slot:slot];}];
+                    choice.state=action==current?UIMenuElementStateOn:UIMenuElementStateOff;
+                    if((!radial&&action==FNVUtilityMore)||(radial&&current==FNVUtilityMore&&source==1))choice.attributes=UIMenuElementAttributesDisabled;
+                    [choices addObject:choice];
+                }
+                [groups addObject:[UIMenu menuWithTitle:source==0?@"Radial":@"More" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:choices]];
+            }
+            entry.menu=[UIMenu menuWithTitle:@"Swap this slot with…" children:groups];entry.showsMenuAsPrimaryAction=YES;[_editorPanel addSubview:entry];y+=42;
+        }
+    }
+    y=[self editorHeading:@"Radial placement and hold" at:y];
+    y=[self editorSlider:@"Horizontal position" target:_settings key:@"radialX" low:0 high:1 y:y];
+    y=[self editorSlider:@"Vertical position" target:_settings key:@"radialY" low:0 high:1 y:y];
+    y=[self editorSlider:@"Radial size" target:_settings key:@"radialSize" low:200 high:380 y:y];
+    y=[self editorSlider:@"Hold threshold (seconds)" target:_settings key:@"hold" low:.22 high:.8 y:y];
+    UIButton *reset=[self editorButton:@"Reset Utilities" rect:CGRectMake(10,y,w-20,38) handler:^{FNVGameplayTouchView *view=weak;if(!view)return;NSMutableDictionary *defaults=FNVDefaultSettings();for(NSString *key in @[@"radialOrder",@"moreOrder",@"radialX",@"radialY",@"radialSize",@"hold"])view->_settings[key]=defaults[key];[view rebuildEditor];[view setNeedsDisplay];}];reset.accessibilityIdentifier=@"utilities-reset";[_editorPanel addSubview:reset];return y+48;
 }
 @end

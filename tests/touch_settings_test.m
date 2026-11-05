@@ -16,7 +16,7 @@ int main(void){@autoreleasepool{
     settings[@"gameButtons"][0][@"opacity"]=@.35;
     settings[@"pipButtons"][0][@"size"]=@72;
     settings[@"gyro"]=@YES;settings[@"gyroY"]=@1.7;
-    settings[@"radialOrder"]=[@[@6,@1,@2,@3,@4,@5,@0] mutableCopy];
+    settings[@"radialOrder"]=[@[@6,@1,@2,@8,@4,@5,@0] mutableCopy];
     [store setObject:settings forKey:FNVTouchSettingsKey];
     NSUserDefaults *cold=[[NSUserDefaults alloc] initWithSuiteName:suite];
     NSMutableDictionary *loaded=FNVTouchLoadSettings(cold);
@@ -35,14 +35,21 @@ int main(void){@autoreleasepool{
     loaded=FNVTouchLoadSettings(store);
     check("migration retains old positions and supplies visible control defaults",fabs([loaded[@"gameButtons"][0][@"x"] doubleValue]-.31)<.0001&&[loaded[@"gameButtons"][0][@"visible"] boolValue]&&[loaded[@"gameButtons"][0][@"label"] boolValue]&&[loaded[@"gameButtons"][0][@"opacity"] doubleValue]==1);
     check("migration does not mutate the stored older layout",store!=nil&&[[store objectForKey:@"FNVTouchControls.v2"] isEqual:legacy]);
+    NSMutableDictionary *v4=FNVDefaultSettings();v4[@"version"]=@4;v4[@"radialOrder"]=[@[@6,@3,@2,@0,@4,@5,@1] mutableCopy];[v4 removeObjectForKey:@"moreOrder"];
+    v4[@"gyroX"]=@5;v4[@"gameButtons"][0][@"x"]=@.77;
+    [store setObject:v4 forKey:@"FNVTouchControls.v4"];loaded=FNVTouchLoadSettings(store);
+    check("v4 migration replaces ammo with holster in its existing radial position",[loaded[@"version"] intValue]==5&&[loaded[@"radialOrder"] isEqual:@[@6,@8,@2,@0,@4,@5,@1]]&&[loaded[@"moreOrder"] isEqual:@[@7,@3,@9,@10,@11,@12]]);
+    check("v4 migration preserves custom controls and leaves rollback preferences intact",[loaded[@"gyroX"] doubleValue]==5&&[loaded[@"gameButtons"][0][@"x"] doubleValue]==.77&&[[store objectForKey:@"FNVTouchControls.v4"] isEqual:v4]);
+    [store removeObjectForKey:@"FNVTouchControls.v4"];
     NSMutableDictionary *v3=FNVDefaultSettings();v3[@"version"]=@3;
+    v3[@"radialOrder"]=[@[@0,@1,@2,@3,@4,@5,@6] mutableCopy];[v3 removeObjectForKey:@"moreOrder"];
     [v3 removeObjectsForKeys:@[@"cameraDirect",@"swipeX",@"swipeY",@"lookMultiplier"]];
     v3[@"lookX"]=@2;v3[@"lookY"]=@2;v3[@"gyroX"]=@5;v3[@"gyroY"]=@5;
     v3[@"gyro"]=@YES;v3[@"gyroAiming"]=@NO;v3[@"gyroInvertX"]=@YES;
     v3[@"ads"]=@1.003979206;v3[@"stickDeadzone"]=@.027393311;v3[@"smoothing"]=@.025;
     v3[@"gameButtons"][0][@"x"]=@.42;
     [store setObject:v3 forKey:@"FNVTouchControls.v3"];loaded=FNVTouchLoadSettings(store);
-    check("build14 migrates to classic 3x without inheriting saturated stick gain",[loaded[@"version"] intValue]==4&&[loaded[@"cameraDirect"] boolValue]&&[loaded[@"swipeX"] doubleValue]==3&&[loaded[@"lookX"] doubleValue]==2);
+    check("build14 migrates to classic 3x without inheriting saturated stick gain",[loaded[@"version"] intValue]==5&&[loaded[@"cameraDirect"] boolValue]&&[loaded[@"swipeX"] doubleValue]==3&&[loaded[@"lookX"] doubleValue]==2);
     check("migration preserves customized gyro, inversion, activation and layout",[loaded[@"gyroX"] doubleValue]==5&&[loaded[@"gyroY"] doubleValue]==5&&[loaded[@"gyro"] boolValue]&&![loaded[@"gyroAiming"] boolValue]&&[loaded[@"gyroInvertX"] boolValue]&&fabs([loaded[@"gameButtons"][0][@"x"] doubleValue]-.42)<1e-9);
     check("migration keeps explicit calibration and ADS values while removing old default attenuation",fabs([loaded[@"ads"] doubleValue]-1.003979206)<1e-9&&fabs([loaded[@"stickDeadzone"] doubleValue]-.027393311)<1e-9&&[loaded[@"smoothing"] doubleValue]==0);
     check("the prior build14 preference remains intact for rollback",[[store objectForKey:@"FNVTouchControls.v3"] isEqual:v3]);
@@ -56,6 +63,22 @@ int main(void){@autoreleasepool{
     check("malformed layouts recover defaults",[loaded[@"gameButtons"] count]==6&&[[NSSet setWithArray:loaded[@"radialOrder"]] count]==7);
     NSDictionary *region=loaded[@"move"];
     check("loaded activation regions fit the safe coordinate space",[region[@"x"] doubleValue]+[region[@"w"] doubleValue]<=1.00001&&[region[@"y"] doubleValue]+[region[@"h"] doubleValue]<=1.00001);
+    loaded=FNVDefaultSettings();
+    check("default utility layout has holster on the radial and change ammo in More",[loaded[@"radialOrder"][3] intValue]==FNVUtilityHolster&&[loaded[@"moreOrder"][1] intValue]==FNVUtilityAmmo&&FNVUtilityLayoutValid(loaded));
+    check("a More action swaps into the radial without losing its former action",FNVUtilityAssign(loaded,YES,0,FNVUtilityCustomize)&&[loaded[@"radialOrder"][0] intValue]==FNVUtilityCustomize&&[loaded[@"moreOrder"][0] intValue]==FNVUtilityReload);
+    check("a radial action swaps into More and preserves every other assignment",FNVUtilityAssign(loaded,NO,5,FNVUtilityHolster)&&[loaded[@"moreOrder"][5] intValue]==FNVUtilityHolster&&[loaded[@"radialOrder"][3] intValue]==FNVUtilityPause&&FNVUtilityLayoutValid(loaded));
+    [store setObject:loaded forKey:FNVTouchSettingsKey];cold=[[NSUserDefaults alloc] initWithSuiteName:suite];
+    check("both utility lists survive a real cold preference reload",[FNVTouchLoadSettings(cold) isEqual:loaded]);
+    BOOL allSwaps=YES;
+    for(unsigned radial=0;radial<2;radial++)for(NSUInteger slot=0;slot<(radial?7:6);slot++)for(NSUInteger action=0;action<FNVUtilityCount;action++){
+        NSMutableDictionary *layout=FNVDefaultSettings(),*beforeSwap=FNVCopySettings(layout);BOOL changed=FNVUtilityAssign(layout,radial,slot,action);
+        if(!FNVUtilityLayoutValid(layout)||(!changed&&![layout isEqual:beforeSwap]))allSwaps=NO;
+    }
+    check("all 169 slot/action choices keep each utility reachable exactly once",allSwaps);
+    before=FNVCopySettings(loaded);
+    check("More cannot be moved into itself or replaced by a hidden More-only action",!FNVUtilityAssign(loaded,NO,0,FNVUtilityMore)&&!FNVUtilityAssign(loaded,YES,6,FNVUtilityReload)&&[loaded isEqual:before]);
+    NSMutableDictionary *broken=FNVDefaultSettings();broken[@"moreOrder"]=[@[@6,@3,@9,@10,@11,@12] mutableCopy];[store setObject:broken forKey:FNVTouchSettingsKey];
+    check("corrupt utility partitions recover a complete usable default layout",FNVUtilityLayoutValid(FNVTouchLoadSettings(store)));
     [store removePersistentDomainForName:suite];
     return failed?1:0;
 }}

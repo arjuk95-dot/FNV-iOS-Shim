@@ -19,6 +19,13 @@ void input_touch_mouse_move(int x,int y){(void)x;(void)y;}
 - (BOOL)buttonAvailable:(NSInteger)index;
 - (void)willResign:(NSNotification *)notification;
 - (void)didResume:(NSNotification *)notification;
+- (void)openOverlay:(NSInteger)kind origin:(CGPoint)point;
+- (void)radialAction:(NSInteger)sector;
+- (void)moreAction:(NSInteger)item;
+- (NSArray *)radialNames;
+- (NSArray *)moreNames;
+- (void)assignUtility:(NSUInteger)action radial:(BOOL)radial slot:(NSUInteger)slot;
+- (void)closeEditorApply:(BOOL)apply;
 @end
 @interface FNVTestView : FNVGameplayTouchView @end
 @implementation FNVTestView
@@ -64,6 +71,67 @@ static void render(FNVGameplayTouchView *view,NSString *directory,NSString *name
         [[UIColor colorWithWhite:.04 alpha:1] setFill];CGContextFillRect(context.CGContext,view.bounds);[view drawRect:view.bounds];
     }];
     check([@"native overlay PNG: " stringByAppendingString:name],[UIImagePNGRepresentation(image) writeToFile:[directory stringByAppendingPathComponent:name] atomically:YES]);
+}
+static void renderEditor(FNVGameplayTouchView *view,NSString *directory){
+    [view layoutIfNeeded];UIGraphicsImageRenderer *renderer=[[UIGraphicsImageRenderer alloc] initWithSize:view.bounds.size];
+    UIImage *image=[renderer imageWithActions:^(UIGraphicsImageRendererContext *context){
+        [[UIColor colorWithWhite:.04 alpha:1] setFill];CGContextFillRect(context.CGContext,view.bounds);[view drawRect:view.bounds];
+        for(UIView *child in view.subviews)if(!child.hidden){[child layoutIfNeeded];[child.layer displayIfNeeded];CGContextSaveGState(context.CGContext);CGContextTranslateCTM(context.CGContext,child.frame.origin.x,child.frame.origin.y);[child.layer renderInContext:context.CGContext];CGContextRestoreGState(context.CGContext);}
+    }];
+    check(@"native Utilities editor PNG",[UIImagePNGRepresentation(image) writeToFile:[directory stringByAppendingPathComponent:@"utilities-editor.png"] atomically:YES]);
+}
+static void utilityChecks(FNVGameplayTouchView *view,NSString *directory){
+    if([[view valueForKey:@"standardFallback"] boolValue])toggle(view);
+    view.frame=CGRectMake(0,0,852,393);[view setValue:FNVDefaultSettings() forKey:@"settings"];fnv_pad_context_set(FNVContextGameplay);[view resetTouches];[view layoutIfNeeded];[view tick:nil];
+    [view openOverlay:1 origin:CGPointZero];
+    check(@"default radial replaces change ammo with Holster / Ready",[view.radialNames[3] isEqual:@"Holster / Ready"]&&![view.radialNames containsObject:@"Change ammo"]);
+    render(view,directory,@"utilities-radial-default.png");
+    [view radialAction:3];NSArray *pulses=[view valueForKey:@"pulses"];double remaining=[pulses.lastObject[@"until"] doubleValue]-CACurrentMediaTime();[view tick:nil];
+    check(@"default radial holster retains the original long X press",remaining>.7&&remaining<=.85&&snapshot().buttons==0x4000);
+    [view resetTouches];[view openOverlay:3 origin:CGPointZero];
+    check(@"default More has change ammo in holster's previous position",[view.moreNames[1] isEqual:@"Change ammo"]&&![view.moreNames containsObject:@"Holster / Ready"]);
+    render(view,directory,@"utilities-more-default.png");
+    [view moreAction:1];[view tick:nil];check(@"Change Ammo moved to More retains its native D-pad-up input",snapshot().buttons==1);
+    [view openEditor];UIScrollView *panel=[view valueForKey:@"editorPanel"];UISegmentedControl *tabs=nil;
+    for(UIView *child in panel.subviews)if([child isKindOfClass:UISegmentedControl.class]&&[child.accessibilityIdentifier isEqual:@"editor-layout"])tabs=(id)child;
+    check(@"native editor exposes a dedicated Utilities tab",tabs.numberOfSegments==3&&[[tabs titleForSegmentAtIndex:2] isEqual:@"Utilities"]);
+    tabs.selectedSegmentIndex=2;[tabs sendActionsForControlEvents:UIControlEventValueChanged];
+    unsigned radial=0,more=0;BOOL choices=YES;
+    for(UIView *child in panel.subviews)if([child isKindOfClass:UIButton.class]){
+        UIButton *button=(id)child;if([button.accessibilityIdentifier hasPrefix:@"utility-radial-"])radial++;else if([button.accessibilityIdentifier hasPrefix:@"utility-more-"])more++;else continue;
+        NSUInteger count=0;for(UIMenu *group in button.menu.children)count+=group.children.count;
+        if(!button.showsMenuAsPrimaryAction||count!=FNVUtilityCount)choices=NO;
+    }
+    check(@"all seven radial and six More slots offer the shared action chooser",radial==7&&more==6&&choices);
+    renderEditor(view,directory);
+    for(UIView *child in panel.subviews)if([child.accessibilityIdentifier isEqual:@"editor-preview"])[(UIButton *)child sendActionsForControlEvents:UIControlEventTouchUpInside];
+    [view tick:nil];check(@"Utilities Preview shows the radial while keeping game input neutral",[[view valueForKey:@"overlay"] intValue]==1&&[[view valueForKey:@"editorPreview"] boolValue]&&neutral(snapshot()));
+    [(UIButton *)[view valueForKey:@"editorReturn"] sendActionsForControlEvents:UIControlEventTouchUpInside];
+    [view assignUtility:FNVUtilityLight radial:YES slot:3];[view closeEditorApply:YES];
+    NSMutableDictionary *settings=[view valueForKey:@"settings"];
+    check(@"native editor Apply exchanges Light and Holster across both surfaces",[settings[@"radialOrder"][3] intValue]==FNVUtilityLight&&[settings[@"moreOrder"][2] intValue]==FNVUtilityHolster&&FNVUtilityLayoutValid(settings)&&[FNVTouchLoadSettings(NSUserDefaults.standardUserDefaults) isEqual:settings]);
+    [view openOverlay:1 origin:CGPointZero];[view radialAction:3];pulses=[view valueForKey:@"pulses"];remaining=[pulses.lastObject[@"until"] doubleValue]-CACurrentMediaTime();[view tick:nil];
+    check(@"Light moved to the radial retains its long native B press",remaining>.85&&remaining<=1&&snapshot().buttons==0x2000);
+    [view resetTouches];[view moreAction:2];pulses=[view valueForKey:@"pulses"];remaining=[pulses.lastObject[@"until"] doubleValue]-CACurrentMediaTime();[view tick:nil];
+    check(@"Holster moved to More retains its long native X press",remaining>.7&&remaining<=.85&&snapshot().buttons==0x4000);
+    [view openEditor];NSMutableDictionary *before=FNVCopySettings([view valueForKey:@"settings"]);[view assignUtility:FNVUtilityReload radial:NO slot:3];[view closeEditorApply:NO];
+    check(@"Cancel restores both utility lists after a cross-menu swap",[[view valueForKey:@"settings"] isEqual:before]);
+    [view openEditor];[view assignUtility:FNVUtilityCustomize radial:YES slot:0];[view closeEditorApply:YES];[view radialAction:0];
+    check(@"Customize Controls works when moved directly onto the radial",[[view valueForKey:@"editing"] boolValue]);[view closeEditorApply:NO];
+    [view openEditor];[view assignUtility:FNVUtilityGyro radial:NO slot:0];[view closeEditorApply:YES];BOOL oldGyro=[[[view valueForKey:@"settings"] objectForKey:@"gyro"] boolValue];[view moreAction:0];
+    check(@"Gyro moved to More toggles and persists with an updated label",[[[view valueForKey:@"settings"] objectForKey:@"gyro"] boolValue]!=oldGyro&&[view.moreNames[0] isEqual:oldGyro?@"Gyro OFF":@"Gyro ON"]&&[[NSUserDefaults.standardUserDefaults objectForKey:FNVTouchSettingsKey][@"gyro"] boolValue]!=oldGyro);
+    [view openEditor];[view assignUtility:FNVUtilityWeapons radial:NO slot:4];[view closeEditorApply:YES];[view moreAction:4];[view tick:nil];
+    check(@"Weapons moved to More opens a persistent unarmed wheel with no B leakage",[[view valueForKey:@"overlay"] integerValue]==2&&![[view valueForKey:@"radialArmed"] boolValue]&&neutral(snapshot()));
+    [view radialAction:0];[view tick:nil];check(@"nested weapon selection retains its original hotkey mask",snapshot().buttons==5);
+    [view resetTouches];[view moreAction:6];[view tick:nil];check(@"More's Back returns to the radial with neutral input",[[view valueForKey:@"overlay"] integerValue]==1&&neutral(snapshot()));
+    [view openEditor];settings=[view valueForKey:@"settings"];settings[@"swipeX"]=@4.5;settings[@"gyroX"]=@12;
+    panel=[view valueForKey:@"editorPanel"];tabs=nil;
+    for(UIView *child in panel.subviews)if([child.accessibilityIdentifier isEqual:@"editor-layout"])tabs=(id)child;
+    tabs.selectedSegmentIndex=2;[tabs sendActionsForControlEvents:UIControlEventValueChanged];
+    for(UIView *child in [panel.subviews copy])if([child.accessibilityIdentifier isEqual:@"utilities-reset"])[(UIButton *)child sendActionsForControlEvents:UIControlEventTouchUpInside];
+    check(@"Reset Utilities restores holster and ammo placement without resetting camera settings",[settings[@"radialOrder"] isEqual:FNVDefaultRadialOrder()]&&[settings[@"moreOrder"] isEqual:FNVDefaultMoreOrder()]&&[settings[@"swipeX"] doubleValue]==4.5&&[settings[@"gyroX"] doubleValue]==12);
+    [view closeEditorApply:YES];
+    [view resetTouches];
 }
 static void run(NSString *directory){
     results=[NSMutableArray new];fnv_use_analog(1);
@@ -121,6 +189,7 @@ static void run(NSString *directory){
     check(@"fallback does not persist itself or rewrite saved custom controls",[[NSUserDefaults.standardUserDefaults objectForKey:FNVTouchSettingsKey] isEqual:custom]);
     const CGSize sizes[]={{852,393},{568,320},{1194,834}};NSArray *names=@[@"standard-controller-phone.png",@"standard-controller-compact.png",@"standard-controller-tablet.png"];
     for(unsigned i=0;i<3;i++){view.frame=(CGRect){CGPointZero,sizes[i]};[view setNeedsLayout];[view layoutIfNeeded];render(view,directory,names[i]);}
+    utilityChecks(view,directory);
     NSDictionary *report=@{@"failures":@(failures),@"cases":results,@"production_view":@YES,@"native_uikit":@YES,@"contact_fixture":@"synthetic contacts delivered to production touch entry points",@"physical_gesture_recognition_verified":@NO,@"gameplay_verified":@NO};
     [[NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:NULL] writeToFile:[directory stringByAppendingPathComponent:@"results.json"] atomically:YES];
     fprintf(stderr,"OVERLAY_TEST_FINISHED failures=%u\n",failures);
