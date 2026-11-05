@@ -13,7 +13,7 @@ optional gyro aiming, and layouts you can customize in the app.
 This is an unofficial, experimental port. The original game runs through a native
 ARM64 runtime with Metal graphics, alongside an iOS interface for touch controls.
 
-**[Download a test release](https://github.com/arjunyerevan95-dot/FNV-iOS-Shim/releases)**
+**[Download a test release](https://github.com/arjuk95-dot/FNV-iOS-Shim/releases)**
 · **[Installation guide](docs/INSTALL.md)**
 · **[Touch controls](docs/TOUCH-CONTROLS.md)**
 
