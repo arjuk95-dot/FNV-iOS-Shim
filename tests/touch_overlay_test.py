@@ -47,7 +47,7 @@ def main():
                 subprocess.run([*flags, *(['-fobjc-arc'] if source.suffix == '.m' else []),
                                 '-c', str(source), '-o', str(obj)], check=True)
                 objects.append(str(obj))
-            subprocess.run([*flags, *objects, *[a for f in ['UIKit', 'Foundation', 'QuartzCore', 'CoreMotion', 'GameController']
+            subprocess.run([*flags, *objects, *[a for f in ['UIKit', 'Foundation', 'CoreGraphics', 'QuartzCore', 'CoreMotion', 'GameController']
                                                for a in ['-framework', f]], '-o', str(app / 'TouchOverlayTest')], check=True)
             info = dict(CFBundleIdentifier=BUNDLE, CFBundleName='TouchOverlayTest',
                         CFBundleExecutable='TouchOverlayTest', CFBundlePackageType='APPL',

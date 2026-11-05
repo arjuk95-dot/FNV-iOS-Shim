@@ -90,6 +90,8 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     return self;
 }
 - (void)dealloc {[_displayLink invalidate];[_motion stopDeviceMotionUpdates];[NSNotificationCenter.defaultCenter removeObserver:self];}
+// Reserve our three-finger shortcut instead of the system text-editing chord.
+- (UIEditingInteractionConfiguration)editingInteractionConfiguration {return UIEditingInteractionConfigurationNone;}
 - (UIColor *)amber:(CGFloat)alpha{return[UIColor colorWithRed:1 green:.73 blue:.25 alpha:alpha];}
 - (BOOL)isGame {return !_standardFallback&&(_editing?!_editingPip:_context==FNVContextGameplay);}
 - (NSMutableArray *)buttonSettings {return _standardFallback?_fallbackButtons:_settings[[self isGame]?@"gameButtons":@"pipButtons"];}

@@ -72,6 +72,7 @@ static void run(NSString *directory){
     FNVTestView *view=[[FNVTestView alloc] initWithFrame:CGRectMake(0,0,852,393)];[view layoutIfNeeded];[view tick:nil];
     UITapGestureRecognizer *gesture=(id)view.gestureRecognizers.firstObject;
     check(@"global recovery uses an exact three-finger double-tap without delaying ordinary touches",[gesture isKindOfClass:UITapGestureRecognizer.class]&&gesture.numberOfTapsRequired==2&&gesture.numberOfTouchesRequired==3&&gesture.cancelsTouchesInView&&!gesture.delaysTouchesBegan&&!gesture.delaysTouchesEnded);
+    check(@"game view reserves the shortcut from system text-editing gestures",view.editingInteractionConfiguration==UIEditingInteractionConfigurationNone);
     for(unsigned context=FNVContextGameplay;context<=FNVContextPipMap;context++){
         fnv_pad_context_set(context);[view tick:nil];toggle(view);
         check([NSString stringWithFormat:@"fallback reachable in context %u with hidden utility button",context],[[view valueForKey:@"standardFallback"] boolValue]&&view.buttonNames.count==16&&[view buttonAvailable:0]&&[view buttonAvailable:15]&&fnv_pad_uses_stick_camera());

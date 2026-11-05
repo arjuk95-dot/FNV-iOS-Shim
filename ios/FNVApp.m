@@ -20,6 +20,11 @@
 + (Class)layerClass { return CAMetalLayer.class; }
 @end
 
+@interface FNVGameViewController : UIViewController @end
+@implementation FNVGameViewController
+- (UIEditingInteractionConfiguration)editingInteractionConfiguration {return UIEditingInteractionConfigurationNone;}
+@end
+
 static CAMetalLayer *screenLayer;
 static pthread_mutex_t activeLock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t activeChanged = PTHREAD_COND_INITIALIZER;
@@ -77,7 +82,7 @@ static NSString *exeHash(NSURL *url) {
 @implementation App
 - (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
-    UIViewController *vc = [UIViewController new];
+    UIViewController *vc = [FNVGameViewController new];
     MetalView *view = [[MetalView alloc] initWithFrame:self.window.bounds];
     vc.view = view; self.window.rootViewController = vc;
     screenLayer = (CAMetalLayer *)view.layer;
