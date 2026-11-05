@@ -32,6 +32,8 @@ ARM64 runtime with Metal graphics, alongside an iOS interface for touch controls
   ammunition, camera view, gyro and More.
 - **Editable layouts:** move, resize, fade or hide controls; adjust the movement
   and navigation regions; keep separate gameplay and Pip-Boy layouts.
+- **Controller fallback:** double-tap with three fingers to show a standard
+  XInput overlay for unusual menus. Repeat the gesture to return to normal.
 
 Pip-Boy, dialogue, looting and VATS use contextual controls. Physical-controller
 input is retained alongside the touch interface. The [controls guide](docs/TOUCH-CONTROLS.md)

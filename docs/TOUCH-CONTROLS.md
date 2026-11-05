@@ -64,6 +64,28 @@ state and buffered events while retaining input from other sources.
 
 ## Context controls
 
+### Standard controller fallback
+
+**Double-tap with three fingers** anywhere on the game view to switch to a
+standard XInput overlay. Repeat the gesture to return to the normal touch layout.
+This works in gameplay, menus, utility wheels and the editor, even when custom
+controls are hidden. In the editor it cancels uncommitted changes.
+
+The fallback exposes both floating analog sticks, D-pad, A/B/X/Y, LT/RT, LB/RB,
+L3/R3, Start and Back. These send raw controller inputs independently of menu
+detection and gameplay remapping. Hold a button to hold its controller input;
+release it to stop. The right stick is a held analog stick rather than swipe look.
+Gyro and gameplay aim toggles are suspended. A visible Standard XInput label shows
+the active mode. Menu changes and backgrounding retain that mode while releasing
+old touch inputs. A cold launch starts with the normal layout.
+
+Switching modes releases touch-owned buttons, both sticks and pending camera
+motion. Saved layouts, sensitivity settings and physical-controller input are
+preserved. The normal generic menu layout also exposes LT and RT for screens such
+as the Vigor Tester that use additional controller navigation.
+
+### Automatic layouts
+
 Actual guest menu visibility selects the layout, including when a physical
 controller opens a menu. Entering a menu releases touch-owned combat and camera
 state before returning its first input snapshot. Existing fingers are quarantined
