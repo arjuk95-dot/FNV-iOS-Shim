@@ -22,7 +22,7 @@ def fetch(run,platform,destination,repository=None):
         validate(destination,platform)
         return destination
     destination.parent.mkdir(parents=True,exist_ok=True)
-    repo=repository or os.environ.get('GITHUB_REPOSITORY','arjunyerevan95-dot/FNV-iOS-Shim')
+    repo=repository or os.environ.get('GITHUB_REPOSITORY','arjuk95-dot/FNV-iOS-Shim')
     with tempfile.TemporaryDirectory(prefix='fnv-codecs-',dir=destination.parent) as directory:
         work=Path(directory).resolve()
         assert work.is_relative_to(destination.parent)
