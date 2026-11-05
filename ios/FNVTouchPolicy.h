@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stddef.h>
 #include "FNVTouchMath.h"
+#include "FNVPad.h"
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -35,6 +36,19 @@ static inline FNVTouchVector FNVTouchMove(double dx,double dy,double radius,doub
     if(length==0||unit<=dz)return(FNVTouchVector){0,0};
     double amount=pow(FNVTouchClamp((unit-dz)/(1-dz),0,1),FNVTouchClamp(response,.25,4));
     return(FNVTouchVector){dx/length*amount,-dy/length*amount};
+}
+static inline int FNVTouchRightStickContext(FNVInputContext context){return fnv_context_is_pip(context)||context==FNVContextVATS||context==FNVContextLockpick||context==FNVContextMinigame;}
+static inline void FNVTouchNavigationStick(FNVPadState *state,FNVInputContext context,int right,double dx,double dy,double radius,double deadzone,double response){
+    if(right&&!FNVTouchRightStickContext(context))return;
+    // Map zoom is vertical-only: the original generic menu handler translates
+    // left-stick X into Data-tab changes.
+    if(!right&&context==FNVContextPipMap)dx=0;
+    FNVTouchVector v=FNVTouchMove(dx,dy,radius,deadzone,response);
+    if(right){state->rx=(int16_t)lround(v.x*32767);state->ry=context==FNVContextLockpick?0:(int16_t)lround(v.y*32767);}
+    else{state->lx=(int16_t)lround(v.x*32767);state->ly=(int16_t)lround(v.y*32767);}
+}
+static inline uint16_t FNVTouchMapButton(unsigned index){
+    switch(index){case 2:return 0x1000;case 3:return 0x2000;case 4:return 0x4000;case 5:return 0x8000;case 6:return 0x200;case 7:return 0x100;case 8:return 4;case 9:return 8;default:return 0;}
 }
 // No motion is carried into a later frame. Excess velocity is deliberately
 // discarded at the game's maximum turn rate instead of becoming a turn tail.

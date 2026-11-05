@@ -48,7 +48,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     UIEdgeInsets _lastInsets;
     UIInterfaceOrientation _lastOrientation;
     NSInteger _count,_overlay,_radialSelection,_selected,_editorSlot;
-    BOOL _aimed,_radialArmed,_editing,_editingPip,_editorPreview,_suspended;
+    BOOL _aimed,_radialArmed,_editing,_editingPip,_editorPreview,_suspended,_reportedCamera;
     CGPoint _radialOrigin,_radialStart;
     CGFloat _radialRadius;
     double _lastFrame,_lookDX,_lookDY,_smoothX,_smoothY,_gyroRateX,_gyroRateY,_gyroSampleAt,_biasX,_biasY,_calibrateUntil,_biasSumX,_biasSumY;
@@ -70,7 +70,6 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     _context=fnv_pad_context();_inputEpoch=fnv_pad_input_epoch();
 #ifndef FNV_PROBE
     fnv_pad_stick_camera(![_settings[@"cameraDirect"] boolValue]);
-    fprintf(stderr,"[touch-camera] direct=%d swipe=%.2f,%.2f gyro=%.2f,%.2f multiplier=%.2f\n",[_settings[@"cameraDirect"] boolValue],[_settings[@"swipeX"] doubleValue],[_settings[@"swipeY"] doubleValue],[_settings[@"gyroX"] doubleValue],[_settings[@"gyroY"] doubleValue],[_settings[@"lookMultiplier"] doubleValue]);
     _motion=[CMMotionManager new];_motion.deviceMotionUpdateInterval=1.0/120.0;
     [self updateMotion];
 #endif
@@ -88,6 +87,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
 - (NSArray<NSString *> *)buttonNames {
     if([self isGame])return @[@"Fire",@"Aim",@"Interact",@"Jump",@"VATS",@"Pip-Boy"];
     if(_context==FNVContextVATS&&!_editing)return @[@"Queue",@"Target",@"Confirm",@"Cancel",@"Special X",@"Special Y",@"Body ↑",@"Body ↓",@"Body ←",@"Body →"];
+    if(_context==FNVContextPipMap&&!_editing)return @[@"Next section",@"Prev section",@"Select / Travel",@"Back / Close",@"Place marker",@"Action Y",@"Zoom +",@"Zoom −",@"Previous tab",@"Next tab"];
     if(_context==FNVContextLockpick&&!_editing)return @[@"",@"",@"",@"Exit",@"Force lock",@"",@"",@"",@"",@""];
     if(_context!=FNVContextPipBoy&&!_editing)return @[@"",@"",@"Confirm",@"Back",@"X action",@"Y action",@"Up",@"Down",@"Left",@"Right"];
     return @[@"Next section",@"Prev section",@"Use / Confirm",@"Back / Close",@"Action X",@"Action Y",@"Up",@"Down",@"Left",@"Right"];
@@ -96,7 +96,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     if(_editing||[self isGame])return YES;
     if(_context==FNVContextLockpick)return index==3||index==4;
     if(_context==FNVContextHacking||_context==FNVContextComputer||_context==FNVContextDialogue)return index==2||index==3||index>=6;
-    if(_context==FNVContextPipBoy||_context==FNVContextVATS)return YES;
+    if(fnv_context_is_pip(_context)||_context==FNVContextVATS)return YES;
     return index>=2;
 }
 - (FNVTouchRect)policySafe{return(FNVTouchRect){_safe.origin.x,_safe.origin.y,_safe.size.width,_safe.size.height};}
@@ -152,8 +152,10 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
             if(label||!icon)[self text:names[i] rect:CGRectMake(_frames[i].origin.x+2,CGRectGetMidY(_frames[i])+(icon?8:-8),_frames[i].size.width-4,30) size:MIN(12,_frames[i].size.width/4) color:[self amber:opacity]];
         }
     }
-    for(FNVFinger *finger in _fingers.allValues)if(finger.state.owner==FNVTouchMoveOwner||(finger.state.owner==FNVTouchMenuOwner&&(_context==FNVContextVATS||_context==FNVContextLockpick||_context==FNVContextMinigame))){
-        double radius=FNVNumber(_settings,@"radius",54,20,120);FNVTouchVector v=FNVTouchMove(finger.state.lastX-finger.origin.x,finger.state.lastY-finger.origin.y,radius,FNVNumber(_settings,@"moveDeadzone",.1,0,.5),FNVNumber(_settings,@"moveResponse",1,.4,3));
+    for(FNVFinger *finger in _fingers.allValues)if(finger.state.owner==FNVTouchMoveOwner||(finger.state.owner==FNVTouchMenuOwner&&FNVTouchRightStickContext(_context))){
+        double radius=FNVNumber(_settings,@"radius",54,20,120),dx=finger.state.lastX-finger.origin.x;
+        if(_context==FNVContextPipMap&&finger.state.owner==FNVTouchMoveOwner)dx=0;
+        FNVTouchVector v=FNVTouchMove(dx,finger.state.lastY-finger.origin.y,radius,FNVNumber(_settings,@"moveDeadzone",.1,0,.5),FNVNumber(_settings,@"moveResponse",1,.4,3));
         double opacity=FNVNumber(_settings,@"opacity",.72,.15,1);
         CGContextSetStrokeColorWithColor(cg,[self amber:.75*opacity].CGColor);CGContextSetLineWidth(cg,1);
         CGContextStrokeEllipseInRect(cg,CGRectMake(finger.origin.x-radius,finger.origin.y-radius,radius*2,radius*2));
@@ -163,13 +165,14 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
         CGContextSetLineWidth(cg,1);CGFloat dash[]={5,4};CGContextSetLineDash(cg,0,dash,2);CGContextSetStrokeColorWithColor(cg,[self amber:.9].CGColor);
         CGContextStrokeRect(cg,_moveRegion);CGContextStrokeRect(cg,_lookRegion);CGContextSetLineDash(cg,0,NULL,0);
         [self text:@"Floating movement" rect:CGRectMake(_moveRegion.origin.x,_moveRegion.origin.y,_moveRegion.size.width,22) size:12 color:[self amber:1]];
-        [self text:@"Swipe look" rect:CGRectMake(_lookRegion.origin.x,_lookRegion.origin.y,_lookRegion.size.width,22) size:12 color:[self amber:1]];
+        [self text:_editingPip?@"Map / preview stick":@"Swipe look" rect:CGRectMake(_lookRegion.origin.x,_lookRegion.origin.y,_lookRegion.size.width,22) size:12 color:[self amber:1]];
         if(_editorPreview)[self text:@"Drag the selected control or region. Tap Settings to continue." rect:CGRectMake(_safe.origin.x+110,_safe.origin.y+8,_safe.size.width-120,40) size:12 color:[self amber:1]];
     }
     if(_overlay==1||_overlay==2)[self drawRadial:cg];
     if(_overlay==3)[self drawMore:cg];
     if(_calibrateUntil>CACurrentMediaTime())[self text:@"Hold still — calibrating gyro" rect:CGRectMake(_safe.origin.x,_safe.origin.y+45,_safe.size.width,24) size:14 color:[self amber:1]];
     if(_context==FNVContextLockpick&&!_editing)[self text:@"Left thumb: pick angle     Right swipe: turn lock" rect:CGRectMake(_safe.origin.x+80,_safe.origin.y+10,_safe.size.width-160,30) size:12 color:[self amber:.9]];
+    if(_context==FNVContextPipMap&&!_editing)[self text:@"Left thumb: zoom     Right thumb: move map     Select: travel" rect:CGRectMake(_safe.origin.x+80,_safe.origin.y+10,_safe.size.width-160,30) size:12 color:[self amber:.9]];
 }
 - (NSArray *)radialNames {
     if(_overlay==2)return @[@"Hotkey 1 ↖",@"Hotkey 3 ↗",@"Hotkey 4 ←",@"Hotkey 5 →",@"Hotkey 6 ↙",@"Hotkey 7 ↓",@"Hotkey 8 ↘"];
@@ -302,12 +305,13 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
             else if(CGRectContainsPoint(_lookRegion,p))owner=FNVTouchLookOwner;
         }else{
             if(hit>=0){owner=FNVTouchNone;
-                if(_context==FNVContextVATS&&hit==1)[self pulseAxis:@"rx" value:.9];
+                if(_context==FNVContextPipMap&&hit>=2)[self pulseMask:FNVTouchMapButton((unsigned)hit) duration:.10];
+                else if(_context==FNVContextVATS&&hit==1)[self pulseAxis:@"rx" value:.9];
                 else if(_context==FNVContextVATS&&hit>=6)[self pulseAxis:hit<8?@"ly":@"lx" value:(hit==6||hit==9)?.9:-.9];
                 else if(hit<2)[self pulseCode:hit==0?17:16 duration:.10];else[self pulseMask:FNVMenuMasks[hit] duration:.10];
             }
             else if(CGRectContainsPoint(_moveRegion,p)){BOOL hasMove=NO;for(FNVFinger *old in _fingers.allValues)if(old.state.owner==FNVTouchMoveOwner)hasMove=YES;if(!hasMove)owner=FNVTouchMoveOwner;}
-            else if(CGRectContainsPoint(_lookRegion,p))owner=FNVTouchMenuOwner;
+            else if(CGRectContainsPoint(_lookRegion,p)){BOOL hasRight=NO;for(FNVFinger *old in _fingers.allValues)if(old.state.owner==FNVTouchMenuOwner)hasRight=YES;if(!hasRight)owner=FNVTouchMenuOwner;}
         }
         finger.state=FNVTouchBegin(owner,p.x,p.y,now);_fingers[[NSValue valueWithNonretainedObject:touch]]=finger;
 #ifdef FNV_PROBE
@@ -322,7 +326,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
         FNVTouchFireSlide(&state,[self insideFire:p]);
         if(state.fire)finger.slidToFire=YES;
         if(state.owner==FNVTouchFireOwner||state.fire){double gain=FNVNumber(_settings,@"fireGain",1,.2,3);_lookDX+=dx*gain;_lookDY+=dy*gain;}
-    }else if(state.owner==FNVTouchLookOwner||(state.owner==FNVTouchMenuOwner&&_context!=FNVContextVATS&&_context!=FNVContextLockpick&&_context!=FNVContextMinigame)){
+    }else if(state.owner==FNVTouchLookOwner||(state.owner==FNVTouchMenuOwner&&!FNVTouchRightStickContext(_context))){
 #ifdef FNV_PROBE
         FNVMouseDelta d=FNVLookTo(&_probeLook,p.x,p.y,self.lookGain);input_mouse_move(d.dx,d.dy);
 #else
@@ -369,6 +373,9 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
 #endif
 }
 - (void)tick:(CADisplayLink *)link {
+    // The app opens fnv.log after constructing this view. Log on the first
+    // display tick so the effective migrated camera settings reach that file.
+    if(!_reportedCamera){_reportedCamera=YES;fprintf(stderr,"[touch-camera] direct=%d swipe=%.2f,%.2f gyro=%.2f,%.2f multiplier=%.2f\n",[_settings[@"cameraDirect"] boolValue],[_settings[@"swipeX"] doubleValue],[_settings[@"swipeY"] doubleValue],[_settings[@"gyroX"] doubleValue],[_settings[@"gyroY"] doubleValue],[_settings[@"lookMultiplier"] doubleValue]);}
     double now=CACurrentMediaTime(),dt=_lastFrame?now-_lastFrame:1.0/60;_lastFrame=now;if(dt>.15){_lookDX=_lookDY=_smoothX=_smoothY=0;dt=1.0/60;}
     UIInterfaceOrientation orientation=self.window.windowScene.interfaceOrientation;
     if(UIInterfaceOrientationIsLandscape(orientation)){
@@ -390,8 +397,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     FNVPadState state={0};BOOL holdingAim=NO;
     if(!_overlay){
         for(FNVFinger *finger in _fingers.allValues){FNVTouchContact c=finger.state;
-            if(c.owner==FNVTouchMoveOwner){FNVTouchVector v=FNVTouchMove(c.lastX-finger.origin.x,c.lastY-finger.origin.y,FNVNumber(_settings,@"radius",54,20,120),FNVNumber(_settings,@"moveDeadzone",.1,0,.5),FNVNumber(_settings,@"moveResponse",1,.4,3));state.lx=(int16_t)lround(v.x*32767);state.ly=(int16_t)lround(v.y*32767);}
-            else if(c.owner==FNVTouchMenuOwner&&(_context==FNVContextVATS||_context==FNVContextLockpick||_context==FNVContextMinigame)){FNVTouchVector v=FNVTouchMove(c.lastX-finger.origin.x,c.lastY-finger.origin.y,FNVNumber(_settings,@"radius",54,20,120),FNVNumber(_settings,@"moveDeadzone",.1,0,.5),FNVNumber(_settings,@"moveResponse",1,.4,3));state.rx=(int16_t)lround(v.x*32767);state.ry=_context==FNVContextLockpick?0:(int16_t)lround(v.y*32767);}
+            if(c.owner==FNVTouchMoveOwner||(c.owner==FNVTouchMenuOwner&&FNVTouchRightStickContext(_context))){FNVTouchNavigationStick(&state,_context,c.owner==FNVTouchMenuOwner,c.lastX-finger.origin.x,c.lastY-finger.origin.y,FNVNumber(_settings,@"radius",54,20,120),FNVNumber(_settings,@"moveDeadzone",.1,0,.5),FNVNumber(_settings,@"moveResponse",1,.4,3));}
             else if(c.owner==FNVTouchFireOwner&&c.fire)[self addCode:fnv_pad_binding(4) state:&state];
             else if(c.owner==FNVTouchAimOwner){holdingAim=YES;if(c.fire)[self addCode:fnv_pad_binding(4) state:&state];}
             else if(c.owner==FNVTouchActionOwner&&finger.action>=0&&finger.action<6)[self addCode:fnv_pad_binding(FNVGameplayActions[finger.action]) state:&state];
@@ -426,7 +432,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     _lookDX=_lookDY=0;fnv_pad_touch_state(&state);[self setNeedsDisplay];
 }
 - (NSArray *)editorTargets {
-    NSMutableArray *names=[[self buttonNames] mutableCopy];[names addObjectsFromArray:_editingPip?@[@"Navigation region",@"Scroll / Map region",@"Utility radial"]:@[@"Movement region",@"Look region",@"Utility radial"]];return names;
+    NSMutableArray *names=[[self buttonNames] mutableCopy];[names addObjectsFromArray:_editingPip?@[@"Navigation / zoom region",@"Map / preview stick region",@"Utility radial"]:@[@"Movement region",@"Look region",@"Utility radial"]];return names;
 }
 - (NSMutableDictionary *)selectedSettings {
     NSMutableArray *buttons=[self buttonSettings];if(_selected<(NSInteger)buttons.count)return buttons[_selected];

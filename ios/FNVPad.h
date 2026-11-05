@@ -14,8 +14,9 @@ typedef enum {
     FNVContextGameplay=0, FNVContextPipBoy=1, FNVContextVATS=2,
     FNVContextMenu=3, FNVContextDialogue=4, FNVContextLoot=5,
     FNVContextMinigame=6, FNVContextUnknown=7,FNVContextLockpick=8,
-    FNVContextHacking=9,FNVContextComputer=10
+    FNVContextHacking=9,FNVContextComputer=10,FNVContextPipMap=11
 } FNVInputContext;
+static inline int fnv_context_is_pip(FNVInputContext value){return value==FNVContextPipBoy||value==FNVContextPipMap;}
 void fnv_pad_touch_state(const FNVPadState *state);
 void fnv_pad_physical_state(const FNVPadState *state,int connected);
 int fnv_pad_physical_active(void);

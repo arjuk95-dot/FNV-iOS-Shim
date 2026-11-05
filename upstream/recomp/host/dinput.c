@@ -131,7 +131,10 @@ static void fnv_sample_game_context(void){
     uint32_t manager=G32(0x11d8a80);
     uint32_t mode=manager?G32(manager+0x0c):0;
     FNVInputContext value=!manager||!MEM[manager]?FNVContextUnknown:(mode==1?FNVContextGameplay:FNVContextMenu);
-    if(MEM[base+1002]||MEM[base+1003]||MEM[base+1023])value=FNVContextPipBoy;
+    uint32_t map=G32(0x11da368),map_page=map&&map<0xffffff00u?G32(map+0x80):0;
+    if(MEM[base+1001]||MEM[base+1013])value=FNVContextMenu;
+    else if(MEM[base+1023]&&(map_page==32||map_page==33))value=FNVContextPipMap;
+    else if(MEM[base+1002]||MEM[base+1003]||MEM[base+1023])value=FNVContextPipBoy;
     else if(MEM[base+1056])value=FNVContextVATS;
     else if(MEM[base+1009])value=FNVContextDialogue;
     else if(MEM[base+1008])value=FNVContextLoot;
@@ -141,7 +144,7 @@ static void fnv_sample_game_context(void){
     static unsigned logs;static FNVInputContext last=FNVContextUnknown;static uint32_t previous_mode;
     if((value!=last||mode!=previous_mode)&&logs++<128){
         unsigned flags=(MEM[base+1002]||MEM[base+1003]||MEM[base+1023]?1:0)|(MEM[base+1056]?2:0)|(MEM[base+1009]?4:0)|(MEM[base+1008]?8:0)|(MEM[base+1014]||MEM[base+1055]||MEM[base+1057]?16:0);
-        fprintf(stderr,"[input-context] kind=%u mode=%u menus=%#x interface=%#x\n",value,mode,flags,manager);
+        fprintf(stderr,"[input-context] kind=%u mode=%u menus=%#x interface=%#x map_page=%u\n",value,mode,flags,manager,map_page);
         last=value;previous_mode=mode;
     }
     fnv_pad_context_set(value);

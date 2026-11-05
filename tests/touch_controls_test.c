@@ -49,6 +49,16 @@ int main(void){
     check("direction smoothing preserves subsequent swipe distance",fabs(hypot(filtered.x,filtered.y)-hypot(10,20))<1e-9);
     filtered=FNVTouchSmooth(filtered,0,0,.016,.025);check("smoothing stops immediately without a rotation tail",filtered.x==0&&filtered.y==0);
     filtered=FNVTouchSmooth((FNVTouchVector){20,0},-20,0,.016,.12);check("reversing a swipe never turns in the previous direction",filtered.x==-20&&filtered.y==0);
+    FNVPadState mapControls={0};
+    FNVTouchNavigationStick(&mapControls,FNVContextPipMap,0,54,-54,54,.1,1);
+    FNVTouchNavigationStick(&mapControls,FNVContextPipMap,1,54,0,54,.1,1);
+    check("Pip-Boy map has independent right-stick pan and vertical-only left-stick zoom",mapControls.lx==0&&mapControls.ly==32767&&mapControls.rx==32767&&mapControls.ry==0);
+    FNVPadState stationaryMap={0};FNVTouchNavigationStick(&stationaryMap,FNVContextPipMap,1,54,0,54,.1,1);
+    check("holding the map stick keeps panning without repeated swipes",stationaryMap.rx==mapControls.rx&&stationaryMap.ry==mapControls.ry);
+    FNVTouchNavigationStick(&stationaryMap,FNVContextPipMap,1,0,0,54,.1,1);check("releasing the map stick returns pan to neutral",stationaryMap.rx==0&&stationaryMap.ry==0);
+    check("map controls use native A selection X marker and LB/RB zoom masks",FNVTouchMapButton(2)==0x1000&&FNVTouchMapButton(4)==0x4000&&FNVTouchMapButton(6)==0x200&&FNVTouchMapButton(7)==0x100);
+    check("Data tabs stay on native D-pad left and right",FNVTouchMapButton(8)==4&&FNVTouchMapButton(9)==8);
+    check("both Pip-Boy page families expose a right navigation stick without enabling gameplay look",FNVTouchRightStickContext(FNVContextPipBoy)&&FNVTouchRightStickContext(FNVContextPipMap)&&!FNVTouchRightStickContext(FNVContextGameplay)&&!FNVTouchRightStickContext(FNVContextDialogue));
     a=FNVTouchMove(1,1,54,.1,1);check("floating movement deadzone",a.x==0&&a.y==0);a=FNVTouchMove(200,-200,54,.1,1);check("radial movement saturation",fabs(hypot(a.x,a.y)-1)<1e-9);
     const FNVTouchRect safe[]={{62,8,832,395},{8,8,552,304},{8,8,1008,740}};
     int valid=1;for(unsigned i=0;i<3;i++)for(unsigned j=0;j<4;j++){FNVTouchRect r=FNVTouchPlace(safe[i],j&1?1:0,j&2?1:0,140);if(r.x<safe[i].x||r.y<safe[i].y||r.x+r.w>safe[i].x+safe[i].w||r.y+r.h>safe[i].y+safe[i].h)valid=0;}check("normalized layouts fit safe areas and rotations",valid);

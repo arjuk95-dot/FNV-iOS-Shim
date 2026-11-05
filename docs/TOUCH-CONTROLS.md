@@ -76,6 +76,18 @@ until a fresh touch. Physical-controller contributions have separate ownership.
 | Lockpick | Left horizontal axis pin angle; right horizontal axis cylinder; X force, B exit |
 | Hacking/terminal | Direction buttons, A select, B exit |
 
+On Local and World Map pages, the right region is a floating **map pan stick**:
+touch it, drag from that origin, and hold to keep moving the map. Release to stop.
+The left region is vertical-only zoom; dragging sideways cannot switch Data tabs.
+The on-screen Zoom + / Zoom − buttons send native RB / LB. Previous/Next Tab uses
+D-pad left/right to cycle Local Map, World Map, Quests, Notes and Radio.
+
+Use **Select / Travel** on a highlighted discovered World Map destination, then
+confirm with a fresh Confirm press. Back cancels. The original game's fast-travel
+restrictions still apply. Place Marker sends X. The fast-travel confirmation takes
+priority over the map context and releases both sticks before accepting new input.
+Stats/Items and the other Data pages keep normal Pip-Boy navigation and section controls.
+
 Landscape changes, backgrounding, cancellation, modal transitions and controller
 takeover clear this overlay's transient inputs. Maximum-turn-rate, dead-zone and
 response calibration account for the game's controller camera behavior; actual
