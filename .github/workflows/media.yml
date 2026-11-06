@@ -48,6 +48,7 @@ jobs:
       - run: python3 tests/input_display_test.py
       - run: python3 tests/touch_controls_test.py
       - run: python3 tests/guest_diagnostics_test.py
+      - run: python3 tests/calltrace_equivalence_test.py
       - run: python3 tests/touch_settings_test.py
       - run: python3 tests/touch_overlay_test.py
       - uses: actions/upload-artifact@v4

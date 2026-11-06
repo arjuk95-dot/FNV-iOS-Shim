@@ -167,16 +167,24 @@ int main(void){@autoreleasepool{
     check("LockRect/UnlockRect uploads a changed movie frame",!near_color(first,28,32,colors[1][0])&&near_color(second,28,32,colors[1][0]));
     check("updated movie draws still reach Metal",draws_done==4&&ff_skipped==skipped_before);
     FramePerf timing={0};
-    perf_add_interval(&timing,100000000,3000000);
+    perf_add_interval(&timing,100000000,3000000,1);
     check("performance warmup does not fabricate an initial frame",timing.intervals==0);
-    perf_add_interval(&timing,140000000,8000000);perf_add_interval(&timing,160000000,21000000);
+    perf_add_interval(&timing,140000000,8000000,1);perf_add_interval(&timing,160000000,21000000,1);
     check("performance separates wall intervals from actual thread CPU time",
         timing.intervals==2&&timing.wall_ns==60000000&&timing.cpu_intervals==2&&timing.cpu_ns==18000000&&timing.max_interval_ns==40000000);
-    perf_reset_window(&timing);perf_add_interval(&timing,180000000,23000000);
+    perf_reset_window(&timing);perf_add_interval(&timing,180000000,23000000,1);
     check("performance window reset preserves the adjacent frame baseline",
         timing.intervals==1&&timing.wall_ns==20000000&&timing.cpu_ns==2000000);
-    perf_add_interval(&timing,170000000,22000000);
+    perf_add_interval(&timing,170000000,22000000,1);
     check("performance rejects backwards clocks",timing.intervals==1&&timing.cpu_ns==2000000);
+    FramePerf switched={0};
+    perf_add_interval(&switched,100000000,9000000000ull,1);
+    perf_add_interval(&switched,120000000,1000000000,2);
+    check("scene presenter thread changes cannot mix independent CPU clocks",switched.intervals==1&&switched.cpu_intervals==0&&switched.cpu_rejected==1);
+    perf_add_interval(&switched,140000000,1005000000,2);
+    check("CPU sampling resumes on the new presenter thread",switched.cpu_intervals==1&&switched.cpu_ns==5000000);
+    perf_add_interval(&switched,160000000,1105000000,2);
+    check("CPU duration cannot exceed its wall interval",switched.cpu_intervals==1&&switched.cpu_rejected==2);
     uint64_t duration=123;
     check("unavailable GPU timestamps remain unknown",!perf_gpu_duration(0,0,&duration)&&duration==123);
     check("invalid GPU timestamps are rejected",!perf_gpu_duration(10,9,&duration)&&!perf_gpu_duration(10,NAN,&duration));

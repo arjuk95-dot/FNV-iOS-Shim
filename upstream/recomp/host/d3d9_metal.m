@@ -277,7 +277,7 @@ static uint64_t stall_ns;                                   // time spent compil
 // completed command-buffer timestamps distinguish GPU work from drawable/queue waits.
 // These counters never change submission order, frames in flight, or game settings.
 typedef struct {
-    uint64_t last_wall, last_cpu, intervals, cpu_intervals, wall_ns, cpu_ns, max_interval_ns;
+    uint64_t last_wall, last_cpu, last_thread, intervals, cpu_intervals, cpu_rejected, wall_ns, cpu_ns, max_interval_ns;
     uint64_t presents, present_ns, drawable_ns, inflight_ns, upload_peak;
 } FramePerf;
 static FramePerf frame_perf;
@@ -288,18 +288,20 @@ static uint64_t perf_thread_cpu_ns(void) {
     if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t)) return 0;
     return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
 }
-static void perf_add_interval(FramePerf *p, uint64_t wall, uint64_t cpu) {
+static void perf_add_interval(FramePerf *p, uint64_t wall, uint64_t cpu, uint64_t thread) {
     if (p->last_wall && wall >= p->last_wall) {
         uint64_t interval = wall - p->last_wall;
         p->wall_ns += interval; p->intervals++;
         if (interval > p->max_interval_ns) p->max_interval_ns = interval;
-        if (p->last_cpu && cpu >= p->last_cpu) { p->cpu_ns += cpu - p->last_cpu; p->cpu_intervals++; }
+        if (p->last_cpu && cpu && thread && thread == p->last_thread && cpu >= p->last_cpu && cpu - p->last_cpu <= interval + 100000) {
+            p->cpu_ns += cpu - p->last_cpu; p->cpu_intervals++;
+        } else p->cpu_rejected++;
     }
-    p->last_wall = wall; p->last_cpu = cpu;
+    p->last_wall = wall; p->last_cpu = cpu; p->last_thread = thread;
 }
 static void perf_reset_window(FramePerf *p) {
-    uint64_t wall = p->last_wall, cpu = p->last_cpu;
-    memset(p, 0, sizeof *p); p->last_wall = wall; p->last_cpu = cpu;
+    uint64_t wall = p->last_wall, cpu = p->last_cpu, thread = p->last_thread;
+    memset(p, 0, sizeof *p); p->last_wall = wall; p->last_cpu = cpu; p->last_thread = thread;
 }
 static int perf_gpu_duration(double start, double end, uint64_t *ns) {
     double duration = (end - start) * 1e9;
@@ -327,11 +329,12 @@ static void perf_report(void) {
     int memory_ok = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&memory, &n) == KERN_SUCCESS;
     double frames = frame_perf.presents ? (double)frame_perf.presents : 1;
     NSProcessInfo *process = NSProcessInfo.processInfo;
-    fprintf(stderr, "[perf] intervals=%llu interval_ms=%.2f max_interval_ms=%.2f main_cpu_ms=%.2f present_ms=%.2f drawable_wait_ms=%.2f inflight_wait_ms=%.2f gpu_ms=%.2f gpu_completed=%llu gpu_unknown=%llu compile_ms_total=%.2f upload_peak_kib=%llu footprint_mib=%.1f thermal=%ld low_power=%d\n",
+    fprintf(stderr, "[perf] intervals=%llu interval_ms=%.2f max_interval_ms=%.2f main_cpu_ms=%.2f cpu_intervals=%llu cpu_rejected=%llu present_ms=%.2f drawable_wait_ms=%.2f inflight_wait_ms=%.2f gpu_ms=%.2f gpu_completed=%llu gpu_unknown=%llu compile_ms_total=%.2f upload_peak_kib=%llu footprint_mib=%.1f thermal=%ld low_power=%d\n",
         (unsigned long long)frame_perf.intervals,
         frame_perf.intervals ? frame_perf.wall_ns / (1e6 * frame_perf.intervals) : -1,
         frame_perf.max_interval_ns / 1e6,
         frame_perf.cpu_intervals ? frame_perf.cpu_ns / (1e6 * frame_perf.cpu_intervals) : -1,
+        (unsigned long long)frame_perf.cpu_intervals, (unsigned long long)frame_perf.cpu_rejected,
         frame_perf.present_ns / (1e6 * frames), frame_perf.drawable_ns / (1e6 * frames), frame_perf.inflight_ns / (1e6 * frames),
         gpu_count ? gpu_ns / (1e6 * gpu_count) : -1,
         (unsigned long long)gpu_count, (unsigned long long)unavailable, (stall_ns - perf_last_stall) / 1e6,
@@ -1140,7 +1143,8 @@ void host_pump_events(void) { fnv_wait_active(); }
 static void d3d_backend_present_impl(D3DState *s) {
     @autoreleasepool {
         uint64_t present_start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
-        perf_add_interval(&frame_perf, present_start, perf_thread_cpu_ns());
+        uint64_t present_thread = 0; pthread_threadid_np(NULL, &present_thread);
+        perf_add_interval(&frame_perf, present_start, perf_thread_cpu_ns(), present_thread);
         end_pass(); ensure_cmd();
         uint64_t drawable_start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
         id<CAMetalDrawable> drawable = layer ? [layer nextDrawable] : nil;

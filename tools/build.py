@@ -40,6 +40,7 @@ def main():
     p.add_argument('--state-probes',default='[]',help='bounded numeric entry/receiver-field diagnostic specification')
     p.add_argument('--codec-prefix',type=Path,help='verified pinned iOS Ogg/Vorbis static libraries')
     p.add_argument('--hybrid-input',default='[]',help='verified camera-only call-site profile')
+    p.add_argument('--no-call-trace',action='store_true',help='omit per-function diagnostic ring writes; traps and bounded state probes remain')
     p.add_argument('--version',default=os.environ.get('GITHUB_RUN_NUMBER','1'),help='positive numeric app build version, independent of the build repository run counter')
     args = p.parse_args()
     if not args.version.isdecimal() or not 0<int(args.version)<=2147483647:p.error('--version must be a positive 32-bit integer')
@@ -98,7 +99,9 @@ def main():
             if codec:flags+=['-DFNV_HAVE_VORBIS','-I',str(codec/'include')]
             if source.suffix=='.m': flags.append('-fobjc-arc')
             if probe: flags.append('-DFNV_PROBE')
-            elif not host_check: flags+=['-DRT_CALLTRACE','-DFNV_GAME_INPUT_CONTEXT']
+            elif not host_check:
+                if not args.no_call_trace: flags.append('-DRT_CALLTRACE')
+                flags.append('-DFNV_GAME_INPUT_CONTEXT')
             key=hashlib.sha256(config+json.dumps(base+flags).encode()+source.name.encode()+content).hexdigest()
             stored=args.cache/(key+'.o') if args.cache else None
             if stored and stored.exists() and digest(stored)==old_manifest.get(stored.name):return str(stored),True
@@ -130,6 +133,8 @@ def main():
                   UISupportedInterfaceOrientations=['UIInterfaceOrientationLandscapeLeft','UIInterfaceOrientationLandscapeRight'])
         if not probe: info['FNVExecutableSHA256']=digest(args.exe)
         info['FNVHybridCameraSites']=[hex(site) for site in sorted(hybrid)]
+        info['FNVGuestCallTraceEnabled']=bool(not probe and not args.no_call_trace)
+        info['FNVOptimizationLevel']='O1'
         if not probe: info.update(compile_icon(tmp,app))
         try:
             info['FNVBuildSourceCommit']=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True,stderr=subprocess.DEVNULL).strip()
