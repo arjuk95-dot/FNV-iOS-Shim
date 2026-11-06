@@ -166,6 +166,30 @@ int main(void){@autoreleasepool{
     update_texture(left,1);NSData *second=draw_frame(left,right);check_frame(second,1);
     check("LockRect/UnlockRect uploads a changed movie frame",!near_color(first,28,32,colors[1][0])&&near_color(second,28,32,colors[1][0]));
     check("updated movie draws still reach Metal",draws_done==4&&ff_skipped==skipped_before);
+    FramePerf timing={0};
+    perf_add_interval(&timing,100000000,3000000);
+    check("performance warmup does not fabricate an initial frame",timing.intervals==0);
+    perf_add_interval(&timing,140000000,8000000);perf_add_interval(&timing,160000000,21000000);
+    check("performance separates wall intervals from actual thread CPU time",
+        timing.intervals==2&&timing.wall_ns==60000000&&timing.cpu_intervals==2&&timing.cpu_ns==18000000&&timing.max_interval_ns==40000000);
+    perf_reset_window(&timing);perf_add_interval(&timing,180000000,23000000);
+    check("performance window reset preserves the adjacent frame baseline",
+        timing.intervals==1&&timing.wall_ns==20000000&&timing.cpu_ns==2000000);
+    perf_add_interval(&timing,170000000,22000000);
+    check("performance rejects backwards clocks",timing.intervals==1&&timing.cpu_ns==2000000);
+    uint64_t duration=123;
+    check("unavailable GPU timestamps remain unknown",!perf_gpu_duration(0,0,&duration)&&duration==123);
+    check("invalid GPU timestamps are rejected",!perf_gpu_duration(10,9,&duration)&&!perf_gpu_duration(10,NAN,&duration));
+    check("completed GPU duration uses GPU timestamps",perf_gpu_duration(10,10.002,&duration)&&duration>=1999999&&duration<=2000001);
+    uint64_t wall0=clock_gettime_nsec_np(CLOCK_UPTIME_RAW),cpu0=perf_thread_cpu_ns();usleep(20000);
+    uint64_t wall1=clock_gettime_nsec_np(CLOCK_UPTIME_RAW),cpu1=perf_thread_cpu_ns();
+    check("native thread CPU clock excludes deliberate waiting",cpu0&&cpu1>=cpu0&&wall1-wall0>=15000000&&cpu1-cpu0<(wall1-wall0)/2);
+    // Exercise the actual production completion handler, preserving pixel checks above.
+    d3d_backend_present(&g_d3d);
+    id<MTLCommandBuffer> fence=[queue commandBuffer];[fence commit];[fence waitUntilCompleted];
+    for(unsigned i=0;i<200&&!(__atomic_load_n(&perf_gpu_count,__ATOMIC_ACQUIRE)+__atomic_load_n(&perf_gpu_unavailable,__ATOMIC_RELAXED));i++)usleep(1000);
+    check("production Metal completion records a GPU sample or explicit unavailability",
+        __atomic_load_n(&perf_gpu_count,__ATOMIC_ACQUIRE)+__atomic_load_n(&perf_gpu_unavailable,__ATOMIC_RELAXED)==1);
     // Keep unsupported fixed-function layouts outside this deliberately narrow path.
     HR(device,89,4);MovieVertex vertices[4]={{0}};uint32_t v=gmalloc(sizeof vertices);memcpy(MEM+v,vertices,sizeof vertices);
     HR(device,83,5,2,v,sizeof(MovieVertex));check("unsupported FVF remains rejected",ff_skipped==skipped_before+1&&draws_done==4);

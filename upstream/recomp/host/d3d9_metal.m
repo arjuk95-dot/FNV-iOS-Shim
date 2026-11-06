@@ -16,6 +16,9 @@
 #import <AVFoundation/AVFoundation.h>
 #import <CoreVideo/CoreVideo.h>
 #include <pthread.h>
+#include <time.h>
+#include <math.h>
+#include <mach/mach.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "d3d9_backend.h"
@@ -270,6 +273,71 @@ static HShader *host_shader(uint32_t o) {
     return h;
 }
 static uint64_t stall_ns;                                   // time spent compiling shaders / pipelines
+// Low-rate diagnostics. Main-thread CPU time distinguishes running from sleeping;
+// completed command-buffer timestamps distinguish GPU work from drawable/queue waits.
+// These counters never change submission order, frames in flight, or game settings.
+typedef struct {
+    uint64_t last_wall, last_cpu, intervals, cpu_intervals, wall_ns, cpu_ns, max_interval_ns;
+    uint64_t presents, present_ns, drawable_ns, inflight_ns, upload_peak;
+} FramePerf;
+static FramePerf frame_perf;
+static uint64_t perf_gpu_ns, perf_gpu_count, perf_gpu_unavailable, perf_last_stall;
+static pthread_mutex_t perf_gpu_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t perf_thread_cpu_ns(void) {
+    struct timespec t;
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t)) return 0;
+    return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
+}
+static void perf_add_interval(FramePerf *p, uint64_t wall, uint64_t cpu) {
+    if (p->last_wall && wall >= p->last_wall) {
+        uint64_t interval = wall - p->last_wall;
+        p->wall_ns += interval; p->intervals++;
+        if (interval > p->max_interval_ns) p->max_interval_ns = interval;
+        if (p->last_cpu && cpu >= p->last_cpu) { p->cpu_ns += cpu - p->last_cpu; p->cpu_intervals++; }
+    }
+    p->last_wall = wall; p->last_cpu = cpu;
+}
+static void perf_reset_window(FramePerf *p) {
+    uint64_t wall = p->last_wall, cpu = p->last_cpu;
+    memset(p, 0, sizeof *p); p->last_wall = wall; p->last_cpu = cpu;
+}
+static int perf_gpu_duration(double start, double end, uint64_t *ns) {
+    double duration = (end - start) * 1e9;
+    if (!(start > 0) || !isfinite(duration) || duration < 0 || duration >= (double)UINT64_MAX) return 0;
+    *ns = (uint64_t)duration; return 1;
+}
+static void perf_gpu_completed(id<MTLCommandBuffer> b) {
+    uint64_t ns;
+    int valid = b.status == MTLCommandBufferStatusCompleted && perf_gpu_duration(b.GPUStartTime, b.GPUEndTime, &ns);
+    pthread_mutex_lock(&perf_gpu_lock);
+    if (valid) {
+        __atomic_fetch_add(&perf_gpu_ns, ns, __ATOMIC_RELAXED);
+        __atomic_fetch_add(&perf_gpu_count, 1, __ATOMIC_RELEASE);
+    } else __atomic_fetch_add(&perf_gpu_unavailable, 1, __ATOMIC_RELAXED);
+    pthread_mutex_unlock(&perf_gpu_lock);
+}
+static void perf_report(void) {
+    // Keep duration and count in the same window when a completion races reporting.
+    pthread_mutex_lock(&perf_gpu_lock);
+    uint64_t gpu_count = __atomic_exchange_n(&perf_gpu_count, 0, __ATOMIC_ACQUIRE);
+    uint64_t gpu_ns = __atomic_exchange_n(&perf_gpu_ns, 0, __ATOMIC_RELAXED);
+    uint64_t unavailable = __atomic_exchange_n(&perf_gpu_unavailable, 0, __ATOMIC_RELAXED);
+    pthread_mutex_unlock(&perf_gpu_lock);
+    task_vm_info_data_t memory = {0}; mach_msg_type_number_t n = TASK_VM_INFO_COUNT;
+    int memory_ok = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&memory, &n) == KERN_SUCCESS;
+    double frames = frame_perf.presents ? (double)frame_perf.presents : 1;
+    NSProcessInfo *process = NSProcessInfo.processInfo;
+    fprintf(stderr, "[perf] intervals=%llu interval_ms=%.2f max_interval_ms=%.2f main_cpu_ms=%.2f present_ms=%.2f drawable_wait_ms=%.2f inflight_wait_ms=%.2f gpu_ms=%.2f gpu_completed=%llu gpu_unknown=%llu compile_ms_total=%.2f upload_peak_kib=%llu footprint_mib=%.1f thermal=%ld low_power=%d\n",
+        (unsigned long long)frame_perf.intervals,
+        frame_perf.intervals ? frame_perf.wall_ns / (1e6 * frame_perf.intervals) : -1,
+        frame_perf.max_interval_ns / 1e6,
+        frame_perf.cpu_intervals ? frame_perf.cpu_ns / (1e6 * frame_perf.cpu_intervals) : -1,
+        frame_perf.present_ns / (1e6 * frames), frame_perf.drawable_ns / (1e6 * frames), frame_perf.inflight_ns / (1e6 * frames),
+        gpu_count ? gpu_ns / (1e6 * gpu_count) : -1,
+        (unsigned long long)gpu_count, (unsigned long long)unavailable, (stall_ns - perf_last_stall) / 1e6,
+        (unsigned long long)(frame_perf.upload_peak / 1024), memory_ok ? memory.phys_footprint / 1048576.0 : -1, (long)process.thermalState, (int)process.lowPowerModeEnabled);
+    perf_last_stall = stall_ns; perf_reset_window(&frame_perf);
+}
 static id<MTLFunction> shader_fn(uint32_t o, HShader *h, const uint16_t *extra, int n_extra, uint32_t depth_mask) {
     uint32_t key = depth_mask * 2654435761u;
     for (int i = 0; i < n_extra; i++) key = (key ^ extra[i]) * 16777619u;
@@ -1071,18 +1139,27 @@ void host_pump_events(void) { fnv_wait_active(); }
 
 static void d3d_backend_present_impl(D3DState *s) {
     @autoreleasepool {
+        uint64_t present_start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+        perf_add_interval(&frame_perf, present_start, perf_thread_cpu_ns());
         end_pass(); ensure_cmd();
+        uint64_t drawable_start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
         id<CAMetalDrawable> drawable = layer ? [layer nextDrawable] : nil;
+        frame_perf.drawable_ns += clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - drawable_start;
         HTex *bb = host_tex(s->backbuffer);
         if (bb && (want_dump(s->frames + 1) || input_take_dump_request())) dump_png(bb.tex, s->frames + 1);
         if (drawable && bb) blit(bb.tex, drawable.texture, 0, 0, 1);
         if (bb) rec_frame(bb.tex);
         if (drawable) [cmd presentDrawable:drawable];
         dispatch_semaphore_t sem = inflight;
-        [cmd addCompletedHandler:^(id<MTLCommandBuffer> b) { (void)b; dispatch_semaphore_signal(sem); }];
+        [cmd addCompletedHandler:^(id<MTLCommandBuffer> b) { perf_gpu_completed(b); dispatch_semaphore_signal(sem); }];
         [cmd commit];
         cmd = nil;
+        uint64_t inflight_start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
         dispatch_semaphore_wait(inflight, DISPATCH_TIME_FOREVER);
+        frame_perf.inflight_ns += clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - inflight_start;
+        frame_perf.present_ns += clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - present_start;
+        frame_perf.presents++;
+        if (ring_off > frame_perf.upload_peak) frame_perf.upload_peak = ring_off;
         ring_idx = (ring_idx + 1) % 3; ring_off = 0;
         // stats
         static uint64_t t0, f0, d0;
@@ -1096,6 +1173,7 @@ static void d3d_backend_present_impl(D3DState *s) {
             fprintf(stderr, "[metal] frame %llu: %.1f fps, %.0f draws/frame (%.0f rendered), %lu pipelines, ff-skipped %llu\n",
                     (unsigned long long)s->frames, (double)(s->frames - f0) / sec, (double)(s->draws - d0) / (double)(s->frames - f0),
                     (double)draws_done / (double)(s->frames - f0), (unsigned long)pipe_count, (unsigned long long)ff_skipped);
+            perf_report();
             t0 = now; f0 = s->frames; d0 = s->draws; draws_done = 0;
         }
     }
