@@ -43,7 +43,7 @@ on:
       codecs_repository:
         description: Repository containing the pinned public codec artifacts and cache
         required: false
-        default: 'arjunyerevan95-dot/FNV-iOS-Shim'
+        default: 'arjuk95-dot/FNV-iOS-Shim'
         type: string
       build_version:
         description: Optional numeric app build number independent of this repository run counter
