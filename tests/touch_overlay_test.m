@@ -70,6 +70,7 @@ static FNVTestContact *begin(FNVGameplayTouchView *view,CGPoint point,NSArray *o
 static void move(FNVGameplayTouchView *view,FNVTestContact *t,CGPoint point){t.point=point;t.phase=UITouchPhaseMoved;[view touchesMoved:(id)[NSSet setWithObject:t] withEvent:nil];}
 static void end(FNVGameplayTouchView *view,FNVTestContact *t){t.phase=UITouchPhaseEnded;FNVTestEvent *event=[FNVTestEvent new];event.allTouches=[NSSet setWithObject:t];[view touchesEnded:(id)event.allTouches withEvent:(id)event];}
 static void toggle(FNVGameplayTouchView *view){[view toggleStandardController:[FNVRecognizedTap new]];[view layoutIfNeeded];}
+static void render(FNVGameplayTouchView *view,NSString *directory,NSString *name);
 static CGPoint normalButton(FNVGameplayTouchView *view,unsigned index){NSDictionary *b=view.buttonSettings[index];FNVTouchRect r=FNVTouchPlace(safe(view),[b[@"x"] doubleValue],[b[@"y"] doubleValue],[b[@"size"] doubleValue]);return CGPointMake(r.x+r.w/2,r.y+r.h/2);}
 static void age(FNVGameplayTouchView *view,FNVTestContact *touch,double seconds){FNVFinger *f=[view valueForKey:@"fingers"][[NSValue valueWithNonretainedObject:touch]];FNVTouchContact c=f.state;c.began=CACurrentMediaTime()-seconds;f.state=c;}
 static void motionSample(FNVGameplayTouchView *view){
