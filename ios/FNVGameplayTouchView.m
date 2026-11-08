@@ -296,6 +296,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
 }
 - (void)recognizeAimHold:(FNVFinger *)finger at:(double)now {
     FNVTouchContact state=finger.state;
+    if(state.owner!=FNVTouchAimOwner||state.consumed)return;
     if(FNVTouchAimHold(&state,now,FNVNumber(_settings,@"aimDelay",.32,.2,.8),[self hitButton:CGPointMake(state.lastX,state.lastY)]==1))_aimed=YES;
     finger.state=state;
 }
@@ -557,7 +558,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     __weak FNVGameplayTouchView *weak=self;_editorReturn=[self editorButton:@"Settings" rect:CGRectZero handler:^{FNVGameplayTouchView *view=weak;if(!view)return;view->_editorPreview=NO;view->_overlay=0;view->_editorPanel.hidden=NO;view->_editorReturn.hidden=YES;[view setNeedsDisplay];}];_editorReturn.backgroundColor=[UIColor colorWithWhite:.03 alpha:.95];_editorReturn.hidden=YES;[self addSubview:_editorReturn];[self setNeedsLayout];[self layoutIfNeeded];[self rebuildEditor];
 }
 - (void)closeEditorApply:(BOOL)apply {
-    if(apply){_settings[@"version"]=@5;[NSUserDefaults.standardUserDefaults setObject:_settings forKey:FNVTouchSettingsKey];}
+    if(apply){_settings[@"version"]=@6;[NSUserDefaults.standardUserDefaults setObject:_settings forKey:FNVTouchSettingsKey];}
     else if(_beforeEdit)_settings=_beforeEdit;
     _beforeEdit=nil;_editing=NO;[_editorPanel removeFromSuperview];[_editorReturn removeFromSuperview];_editorPanel=nil;_editorReturn=nil;[self resetTouches];[self setNeedsLayout];
 }
