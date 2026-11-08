@@ -123,4 +123,13 @@ enum {FNVTouchNone,FNVTouchMoveOwner,FNVTouchLookOwner,FNVTouchFireOwner,FNVTouc
 static inline FNVTouchContact FNVTouchBegin(int owner,double x,double y,double time){return(FNVTouchContact){x,y,x,y,time,owner,0,owner==FNVTouchFireOwner};}
 static inline int FNVTouchRecognizeHold(FNVTouchContact *c,double now,double threshold){if(c->owner!=FNVTouchUtilityOwner||c->consumed||now-c->began<threshold)return 0;c->consumed=1;return 1;}
 static inline int FNVTouchUtilityTap(const FNVTouchContact *c,double now,double threshold){return c->owner==FNVTouchUtilityOwner&&!c->consumed&&now-c->began<threshold&&hypot(c->lastX-c->startX,c->lastY-c->startY)<24;}
+// A hold consumes this contact once. Release after the threshold also counts,
+// even when a busy game frame prevented the display link observing the hold.
+static inline int FNVTouchAimHold(FNVTouchContact *c,double now,double threshold,int insideAim){
+    if(c->owner!=FNVTouchAimOwner||c->consumed||!insideAim||now-c->began<threshold)return 0;
+    c->consumed=1;return 1;
+}
+static inline int FNVTouchAimTap(const FNVTouchContact *c,double now,double threshold,int insideAim){
+    return c->owner==FNVTouchAimOwner&&!c->consumed&&insideAim&&now-c->began<threshold&&hypot(c->lastX-c->startX,c->lastY-c->startY)<24;
+}
 static inline int FNVTouchFireSlide(FNVTouchContact *c,int inside){if(c->owner!=FNVTouchFireOwner&&c->owner!=FNVTouchAimOwner)return 0;int changed=c->fire!=!!inside;c->fire=!!inside;return changed;}

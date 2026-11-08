@@ -5,10 +5,16 @@ always floats: a new left-region touch establishes a new origin; releasing it
 hides the stick and returns movement to neutral. Swipe the open right region
 to look, or drag from Fire while firing. Background swipes cannot acquire Fire.
 
-Aim defaults to toggle. Start on Aim and slide onto Fire to shoot while aiming;
-lifting releases Fire and keeps toggle Aim active. Customize Controls offers
-hold mode for melee blocking. Automatic weapon-type detection is not available,
-so select that mode explicitly when needed.
+Tap **Aim / Gyro** during regular gameplay to enable or disable gyro, independently
+of aiming down sights (ADS). Hold it for 0.32 seconds to enter ADS; lifting your
+finger keeps ADS active. The next tap exits ADS without changing gyro. Once out
+of ADS, taps toggle gyro again. The button shows **Gyro ON**, **Gyro OFF** or
+**Exit ADS** so you can see which action a tap will take.
+
+You can also start on Aim and slide onto Fire to aim and shoot immediately.
+Lifting stops Fire and keeps ADS active. The hold delay is adjustable in Customize
+Controls. A cancelled touch or release outside Aim does not toggle gyro.
+ADS sends the game's normal Aim / melee-block binding.
 
 Tap Pip-Boy for a normal press. Hold it for the local utility radial; this consumes
 the gesture without sending a Pip-Boy/light hold to the game. Slide and release
@@ -31,15 +37,20 @@ Reset Selected and Reset Layout recover defaults. Hidden controls stay in the
 selection list. Holding four fingers for 1.2 seconds recovers the editor even
 if the Pip-Boy button has been hidden.
 
-Gyro starts disabled when no preference exists. Its radial toggle and preferences
-persist. The editor offers aiming-only or always-in-gameplay behavior, horizontal
-and vertical sensitivity/inversion, and calibration/recentering. Keep the phone
-still during calibration. Gyro and touch are combined before relative-count
+Gyro starts disabled when no preference exists. Aim's tap, the radial toggle and
+the editor control the same saved preference. When enabled, gyro works throughout
+gameplay, both in and out of ADS; it stays off in game menus. The editor offers
+horizontal and vertical sensitivity/inversion, and calibration/recentering. Keep
+the phone still during explicit calibration. Toggling gyro does not recalibrate
+against a moving phone. Gyro and touch are combined before relative-count
 quantization in Direct mode. Controller response combines them before stick
 clamping and discards overflow rather than queuing unwanted rotation.
 
-Settings use the versioned `FNVTouchControls.v5` preference and safe-area-relative
-positions. They do not edit game INIs or saves.
+Settings use the versioned `FNVTouchControls.v6` preference and safe-area-relative
+positions. Existing layouts, sensitivity values, gyro state and utility assignments
+migrate automatically. The older preference remains available for rollback.
+The old hold-only ADS and aiming-only gyro options are replaced by the gestures
+above. Game INIs and saves are not edited.
 
 ## Move actions between Radial and More
 

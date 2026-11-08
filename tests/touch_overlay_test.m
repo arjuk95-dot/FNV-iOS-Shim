@@ -8,7 +8,12 @@
 
 void input_key(int key,int down){(void)key;(void)down;}
 void input_touch_mouse_reset(void){}
-void input_touch_mouse_move(int x,int y){(void)x;(void)y;}
+static int mouseX,mouseY;
+void input_touch_mouse_move(int x,int y){mouseX+=x;mouseY+=y;}
+
+@interface FNVFinger : NSObject
+@property(nonatomic) FNVTouchContact state;
+@end
 
 @interface FNVGameplayTouchView (TestEntryPoints)
 - (void)tick:(CADisplayLink *)link;
@@ -65,6 +70,69 @@ static FNVTestContact *begin(FNVGameplayTouchView *view,CGPoint point,NSArray *o
 static void move(FNVGameplayTouchView *view,FNVTestContact *t,CGPoint point){t.point=point;t.phase=UITouchPhaseMoved;[view touchesMoved:(id)[NSSet setWithObject:t] withEvent:nil];}
 static void end(FNVGameplayTouchView *view,FNVTestContact *t){t.phase=UITouchPhaseEnded;FNVTestEvent *event=[FNVTestEvent new];event.allTouches=[NSSet setWithObject:t];[view touchesEnded:(id)event.allTouches withEvent:(id)event];}
 static void toggle(FNVGameplayTouchView *view){[view toggleStandardController:[FNVRecognizedTap new]];[view layoutIfNeeded];}
+static CGPoint normalButton(FNVGameplayTouchView *view,unsigned index){NSDictionary *b=view.buttonSettings[index];FNVTouchRect r=FNVTouchPlace(safe(view),[b[@"x"] doubleValue],[b[@"y"] doubleValue],[b[@"size"] doubleValue]);return CGPointMake(r.x+r.w/2,r.y+r.h/2);}
+static void age(FNVGameplayTouchView *view,FNVTestContact *touch,double seconds){FNVFinger *f=[view valueForKey:@"fingers"][[NSValue valueWithNonretainedObject:touch]];FNVTouchContact c=f.state;c.began=CACurrentMediaTime()-seconds;f.state=c;}
+static void motionSample(FNVGameplayTouchView *view){
+    [view setValue:@0 forKey:@"calibrateUntil"];[view setValue:@0 forKey:@"biasX"];[view setValue:@0 forKey:@"biasY"];
+    [view setValue:@1 forKey:@"gyroRateX"];[view setValue:@0 forKey:@"gyroRateY"];
+    [view setValue:@(CACurrentMediaTime()) forKey:@"gyroSampleAt"];[view setValue:@(CACurrentMediaTime()-1.0/60) forKey:@"lastFrame"];
+    mouseX=mouseY=0;[view tick:nil];
+}
+static void aimChecks(FNVGameplayTouchView *view,NSString *directory){
+    if([[view valueForKey:@"standardFallback"] boolValue])toggle(view);
+    [view resetTouches];[view setValue:FNVDefaultSettings() forKey:@"settings"];view.frame=CGRectMake(0,0,852,393);
+    fnv_pad_context_set(FNVContextGameplay);[view tick:nil];[view setNeedsLayout];[view layoutIfNeeded];
+    NSMutableDictionary *settings=[view valueForKey:@"settings"];CGPoint aim=normalButton(view,1),fire=normalButton(view,0);
+    FNVTestContact *t=begin(view,aim,@[]);[view tick:nil];
+    check(@"Aim down waits for the hold threshold without sending LT or enabling gyro",neutral(snapshot())&&![settings[@"gyro"] boolValue]);
+    end(view,t);[view tick:nil];
+    check(@"normal Aim tap enables and persists gyro without ADS",[settings[@"gyro"] boolValue]&&snapshot().left_trigger==0&&[[NSUserDefaults.standardUserDefaults objectForKey:FNVTouchSettingsKey][@"gyro"] boolValue]&&[view.buttonNames[1] isEqual:@"Gyro ON"]);
+    motionSample(view);check(@"enabled gyro turns the gameplay camera while ADS is off",mouseX>0&&snapshot().left_trigger==0);
+    render(view,directory,@"aim-gyro-enabled.png");
+    t=begin(view,aim,@[]);age(view,t,1);[view tick:nil];
+    check(@"holding Aim enters ADS without changing the gyro preference",snapshot().left_trigger==255&&[settings[@"gyro"] boolValue]);
+    end(view,t);[view tick:nil];
+    check(@"releasing the hold keeps ADS latched and does not toggle gyro",snapshot().left_trigger==255&&[settings[@"gyro"] boolValue]&&[view.buttonNames[1] isEqual:@"Exit ADS"]);
+    motionSample(view);check(@"gyro remains active in ADS",mouseX>0&&snapshot().left_trigger==255);
+    render(view,directory,@"aim-ads-latched.png");
+    t=begin(view,aim,@[]);end(view,t);[view tick:nil];
+    check(@"first tap after ADS exits it while leaving gyro enabled",snapshot().left_trigger==0&&[settings[@"gyro"] boolValue]);
+    t=begin(view,aim,@[]);end(view,t);[view tick:nil];
+    check(@"the following tap disables gyro without entering ADS",snapshot().left_trigger==0&&![settings[@"gyro"] boolValue]);
+    motionSample(view);check(@"disabled gyro cannot turn the camera",mouseX==0&&mouseY==0);
+    t=begin(view,aim,@[]);age(view,t,1);end(view,t);[view tick:nil];
+    check(@"a hold released between display ticks enters ADS with gyro still off",snapshot().left_trigger==255&&![settings[@"gyro"] boolValue]);
+    t=begin(view,aim,@[]);age(view,t,1);[view tick:nil];end(view,t);[view tick:nil];
+    check(@"another long hold while in ADS does not toggle either state",snapshot().left_trigger==255&&![settings[@"gyro"] boolValue]);
+    t=begin(view,aim,@[]);end(view,t);[view tick:nil];
+    check(@"ADS exit also leaves an already disabled gyro off",snapshot().left_trigger==0&&![settings[@"gyro"] boolValue]);
+    t=begin(view,aim,@[]);move(view,t,fire);[view tick:nil];
+    check(@"Aim slide to Fire enters ADS and fires before the hold deadline",snapshot().left_trigger==255&&snapshot().right_trigger==255&&![settings[@"gyro"] boolValue]);
+    end(view,t);[view tick:nil];check(@"slide release stops firing but keeps ADS without a gyro tap",snapshot().left_trigger==255&&snapshot().right_trigger==0&&![settings[@"gyro"] boolValue]);
+    [view resetTouches];t=begin(view,aim,@[]);move(view,t,CGPointMake(450,60));age(view,t,1);end(view,t);[view tick:nil];
+    check(@"dragging off Aim and releasing outside cancels the gesture",neutral(snapshot())&&![settings[@"gyro"] boolValue]);
+    t=begin(view,aim,@[]);[view touchesCancelled:(id)[NSSet setWithObject:t] withEvent:nil];end(view,t);[view tick:nil];
+    check(@"cancelled tap leaves gyro unchanged and no ADS input",neutral(snapshot())&&![settings[@"gyro"] boolValue]);
+    FNVTestContact *walk=begin(view,CGPointMake(150,150),@[]);move(view,walk,CGPointMake(175,130));
+    FNVTestContact *shoot=begin(view,fire,@[walk]);t=begin(view,aim,@[walk,shoot]);end(view,t);[view tick:nil];
+    check(@"tapping gyro preserves another finger's movement and held Fire",snapshot().lx>0&&snapshot().ly>0&&snapshot().right_trigger==255&&snapshot().left_trigger==0&&[settings[@"gyro"] boolValue]);
+    end(view,walk);end(view,shoot);[view resetTouches];
+    t=begin(view,aim,@[]);FNVTestContact *duplicate=begin(view,aim,@[t]);end(view,duplicate);[view tick:nil];
+    check(@"a second finger on Aim cannot steal or duplicate the first gesture",[settings[@"gyro"] boolValue]&&snapshot().left_trigger==0);
+    end(view,t);[view tick:nil];check(@"the owning Aim finger toggles exactly once",![settings[@"gyro"] boolValue]&&neutral(snapshot()));
+    t=begin(view,aim,@[]);fnv_pad_context_set(FNVContextPipMap);end(view,t);[view tick:nil];
+    check(@"menu transition before release discards a pending gyro tap",![settings[@"gyro"] boolValue]&&neutral(snapshot()));
+    fnv_pad_context_set(FNVContextGameplay);[view tick:nil];[view layoutIfNeeded];t=begin(view,aim,@[]);age(view,t,1);[view tick:nil];[view willResign:nil];end(view,t);[view didResume:nil];[view tick:nil];
+    check(@"background and resume release ADS without toggling gyro",neutral(snapshot())&&![settings[@"gyro"] boolValue]);
+    t=begin(view,aim,@[]);FNVPadState physical={0};physical.buttons=0x1000;fnv_pad_physical_state(&physical,1);end(view,t);[view tick:nil];
+    check(@"physical-controller takeover discards Aim and keeps physical input intact",snapshot().buttons==0x1000&&snapshot().left_trigger==0&&![settings[@"gyro"] boolValue]);
+    fnv_pad_physical_state(NULL,0);[view tick:nil];t=begin(view,aim,@[]);age(view,t,1);[view tick:nil];end(view,t);toggle(view);[view tick:nil];
+    check(@"standard fallback clears latched ADS and continues to expose raw LT",neutral(snapshot())&&[[view valueForKey:@"standardFallback"] boolValue]);
+    toggle(view);[view tick:nil];check(@"return from fallback has no hidden ADS latch",neutral(snapshot())&&![[view valueForKey:@"aimed"] boolValue]);
+    settings[@"cameraDirect"]=@NO;settings[@"gyro"]=@YES;motionSample(view);
+    check(@"gyro also works independently of ADS in controller-camera mode",snapshot().rx>0&&snapshot().left_trigger==0);
+    [view resetTouches];
+}
 static void render(FNVGameplayTouchView *view,NSString *directory,NSString *name){
     [view layoutIfNeeded];UIGraphicsImageRenderer *renderer=[[UIGraphicsImageRenderer alloc] initWithSize:view.bounds.size];
     UIImage *image=[renderer imageWithActions:^(UIGraphicsImageRendererContext *context){
@@ -193,6 +261,7 @@ static void run(NSString *directory){
     const CGSize sizes[]={{852,393},{568,320},{1194,834}};NSArray *names=@[@"standard-controller-phone.png",@"standard-controller-compact.png",@"standard-controller-tablet.png"];
     for(unsigned i=0;i<3;i++){view.frame=(CGRect){CGPointZero,sizes[i]};[view setNeedsLayout];[view layoutIfNeeded];render(view,directory,names[i]);}
     utilityChecks(view,directory);
+    aimChecks(view,directory);
     NSDictionary *report=@{@"failures":@(failures),@"cases":results,@"production_view":@YES,@"native_uikit":@YES,@"contact_fixture":@"synthetic contacts delivered to production touch entry points",@"physical_gesture_recognition_verified":@NO,@"gameplay_verified":@NO};
     [[NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:NULL] writeToFile:[directory stringByAppendingPathComponent:@"results.json"] atomically:YES];
     fprintf(stderr,"OVERLAY_TEST_FINISHED failures=%u\n",failures);

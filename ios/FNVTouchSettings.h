@@ -2,7 +2,7 @@
 #import <Foundation/Foundation.h>
 #include "FNVTouchPolicy.h"
 
-static NSString *const FNVTouchSettingsKey=@"FNVTouchControls.v5";
+static NSString *const FNVTouchSettingsKey=@"FNVTouchControls.v6";
 enum {FNVUtilityReload,FNVUtilityCrouch,FNVUtilityWeapons,FNVUtilityAmmo,FNVUtilityView,FNVUtilityGyro,FNVUtilityMore,FNVUtilityCustomize,FNVUtilityHolster,FNVUtilityLight,FNVUtilityGrab,FNVUtilityWait,FNVUtilityPause,FNVUtilityCount};
 static NSArray<NSString *> *FNVUtilityNames(void){static NSArray *names;static dispatch_once_t once;dispatch_once(&once,^{names=@[@"Reload",@"Crouch",@"Weapons",@"Change ammo",@"Camera view",@"Gyro On/Off",@"More",@"Customize Controls",@"Holster / Ready",@"Pip-Boy Light",@"Grab / Drop",@"Wait",@"Pause / Menu"];});return names;}
 static NSMutableArray *FNVDefaultRadialOrder(void){return [@[@0,@1,@2,@8,@4,@5,@6] mutableCopy];}
@@ -44,7 +44,7 @@ static NSMutableDictionary *FNVDefaultSettings(void){
     NSMutableArray *gameButtons=[NSMutableArray new],*pipButtons=[NSMutableArray new];
     for(unsigned i=0;i<6;i++)[gameButtons addObject:[@{@"x":@(game[i][0]),@"y":@(game[i][1]),@"size":@(game[i][2]),@"opacity":@1,@"visible":@YES,@"label":@YES} mutableCopy]];
     for(unsigned i=0;i<10;i++)[pipButtons addObject:[@{@"x":@(menu[i][0]),@"y":@(menu[i][1]),@"size":@(menu[i][2]),@"opacity":@1,@"visible":@YES,@"label":@YES} mutableCopy]];
-    return [@{@"version":@5,@"gameButtons":gameButtons,@"pipButtons":pipButtons,
+    return [@{@"version":@6,@"gameButtons":gameButtons,@"pipButtons":pipButtons,
         @"move":[@{@"x":@.03,@"y":@.18,@"w":@.39,@"h":@.70} mutableCopy],
         @"look":[@{@"x":@.43,@"y":@.15,@"w":@.54,@"h":@.75} mutableCopy],
         @"pipMove":[@{@"x":@.03,@"y":@.18,@"w":@.30,@"h":@.70} mutableCopy],
@@ -53,7 +53,7 @@ static NSMutableDictionary *FNVDefaultSettings(void){
         @"cameraDirect":@YES,@"swipeX":@3,@"swipeY":@3,@"lookMultiplier":@1,
         @"lookX":@.20,@"lookY":@.20,@"ads":@1,@"fireGain":@1,@"invertX":@NO,@"invertY":@NO,
         @"smoothing":@0,@"stickDeadzone":@.265175,@"stickResponse":@2,@"maxTurnRate":@171.887,
-        @"aimHold":@NO,@"gyro":@NO,@"gyroAiming":@YES,@"gyroX":@3,@"gyroY":@3,@"gyroInvertX":@NO,@"gyroInvertY":@NO,
+        @"aimDelay":@.32,@"gyro":@NO,@"gyroX":@3,@"gyroY":@3,@"gyroInvertX":@NO,@"gyroInvertY":@NO,
         @"radialX":@.72,@"radialY":@.43,@"radialSize":@250,@"hold":@.38,
         @"radialOrder":FNVDefaultRadialOrder(),@"moreOrder":FNVDefaultMoreOrder()} mutableCopy];
 }
@@ -61,10 +61,10 @@ static NSMutableDictionary *FNVDefaultSettings(void){
 // Shared production loader: isolated Foundation tests exercise a real cold reload.
 static NSMutableDictionary *FNVTouchLoadSettings(NSUserDefaults *defaults){
     NSMutableDictionary *settings=FNVDefaultSettings();
-    id saved=[defaults objectForKey:FNVTouchSettingsKey]?:[defaults objectForKey:@"FNVTouchControls.v4"]?:[defaults objectForKey:@"FNVTouchControls.v3"]?:[defaults objectForKey:@"FNVTouchControls.v2"]?:[defaults objectForKey:@"FNVTouchControls"];
+    id saved=[defaults objectForKey:FNVTouchSettingsKey]?:[defaults objectForKey:@"FNVTouchControls.v5"]?:[defaults objectForKey:@"FNVTouchControls.v4"]?:[defaults objectForKey:@"FNVTouchControls.v3"]?:[defaults objectForKey:@"FNVTouchControls.v2"]?:[defaults objectForKey:@"FNVTouchControls"];
     if([saved isKindOfClass:NSDictionary.class]){
         NSMutableDictionary *copy=FNVCopySettings(saved);
-        if([copy[@"version"] integerValue]<=5){
+        if([copy[@"version"] integerValue]<=6){
             for(NSString *key in [settings.allKeys copy]){id value=copy[key],expected=settings[key];BOOL compatible=([expected isKindOfClass:NSNumber.class]&&[value isKindOfClass:NSNumber.class])||([expected isKindOfClass:NSArray.class]&&[value isKindOfClass:NSArray.class])||([expected isKindOfClass:NSDictionary.class]&&[value isKindOfClass:NSDictionary.class]);if(compatible)settings[key]=value;}
             if([copy[@"version"] integerValue]<4){
                 // New direct sensitivities start at the owner-tested classic 3x.
@@ -78,7 +78,7 @@ static NSMutableDictionary *FNVTouchLoadSettings(NSUserDefaults *defaults){
                 for(NSUInteger i=0;i<order.count;i++)if([order[i] isKindOfClass:NSNumber.class]&&[order[i] integerValue]==FNVUtilityAmmo)order[i]=@(FNVUtilityHolster);
                 settings[@"moreOrder"]=FNVDefaultMoreOrder();
             }
-            settings[@"version"]=@5;
+            settings[@"version"]=@6;
         }
     }
     for(NSString *key in @[@"gameButtons",@"pipButtons"]){

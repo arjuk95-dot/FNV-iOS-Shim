@@ -13,7 +13,7 @@ optional gyro aiming, and layouts you can customize in the app.
 This is an unofficial, experimental port. The original game runs through a native
 ARM64 runtime with Metal graphics, alongside an iOS interface for touch controls.
 
-**[Download a test release](https://github.com/arjunyerevan95-dot/FNV-iOS-Shim/releases)**
+**[Download a test release](https://github.com/arjuk95-dot/FNV-iOS-Shim/releases)**
 · **[Installation guide](docs/INSTALL.md)**
 · **[Touch controls](docs/TOUCH-CONTROLS.md)**
 
@@ -24,9 +24,10 @@ ARM64 runtime with Metal graphics, alongside an iOS interface for touch controls
 - **Classic swipe look:** the default restores the earlier 3× aiming response,
   preserving the distance of fast swipes. Drag on Fire to adjust aim while shooting.
 - **Six core actions:** Fire, Aim, Interact, Jump, VATS and Pip-Boy stay within reach.
-- **Aim your way:** toggle or hold Aim, slide from Aim onto Fire, and adjust the
-  shared look multiplier, aiming multiplier and separate horizontal/vertical gains.
-- **Optional gyro:** aiming-only or always during gameplay, with calibration,
+- **Aim and gyro:** tap Aim to toggle gyro; hold it to enter ADS, then tap to exit
+  ADS without changing gyro. Slide from Aim onto Fire to aim and shoot. Adjust the
+  hold delay, shared look multiplier, aiming multiplier and per-axis gains.
+- **Optional gyro:** works both in and out of ADS, with calibration,
   inversion and a wider sensitivity range. Gyro stays off in game menus.
 - **Utilities without clutter:** hold Pip-Boy for reload, crouch, weapon hotkeys,
   holster/ready, camera view, gyro and More. Move actions between the wheel and More

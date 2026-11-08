@@ -8,7 +8,7 @@ int main(void){@autoreleasepool{
     [store removePersistentDomainForName:suite];
     NSMutableDictionary *settings=FNVTouchLoadSettings(store);
     check("new installation has six gameplay controls and dedicated Jump",[settings[@"gameButtons"] count]==6&&[settings[@"gameButtons"][3][@"visible"] boolValue]);
-    check("gyro is off and gun Aim toggles by default",![settings[@"gyro"] boolValue]&&![settings[@"aimHold"] boolValue]);
+    check("gyro starts off and Aim has an independent adjustable hold threshold",![settings[@"gyro"] boolValue]&&[settings[@"aimDelay"] doubleValue]==.32&&!settings[@"aimHold"]&&!settings[@"gyroAiming"]);
     check("new baseline is classic direct swipe 3x with no distance-damping filter",[settings[@"cameraDirect"] boolValue]&&[settings[@"swipeX"] doubleValue]==3&&[settings[@"swipeY"] doubleValue]==3&&[settings[@"smoothing"] doubleValue]==0);
     check("gyro starts at 3x with neutral common and aiming multipliers",[settings[@"gyroX"] doubleValue]==3&&[settings[@"gyroY"] doubleValue]==3&&[settings[@"lookMultiplier"] doubleValue]==1&&[settings[@"ads"] doubleValue]==1);
     check("Pip-Boy has its own editable layout",[settings[@"pipButtons"] count]==10&&settings[@"pipButtons"]!=settings[@"gameButtons"]);
@@ -28,6 +28,12 @@ int main(void){@autoreleasepool{
     edited[@"gameButtons"][0][@"x"]=@.2;
     check("editor snapshot remains independent of staged edits",[before isEqual:loaded]&&![before isEqual:edited]);
     [store removeObjectForKey:FNVTouchSettingsKey];
+    NSMutableDictionary *v5=FNVCopySettings(edited);v5[@"version"]=@5;v5[@"aimHold"]=@YES;v5[@"gyroAiming"]=@YES;[v5 removeObjectForKey:@"aimDelay"];
+    [store setObject:v5 forKey:@"FNVTouchControls.v5"];loaded=FNVTouchLoadSettings(store);
+    check("v5 migrates all tuning and utility assignments into independent gyro and ADS",[loaded[@"version"] intValue]==6&&[loaded[@"aimDelay"] doubleValue]==.32&&[loaded[@"gyro"] boolValue]&&[loaded[@"gyroY"] doubleValue]==1.7&&[loaded[@"gameButtons"] isEqual:v5[@"gameButtons"]]&&[loaded[@"radialOrder"] isEqual:v5[@"radialOrder"]]&&[loaded[@"moreOrder"] isEqual:v5[@"moreOrder"]]&&!loaded[@"aimHold"]&&!loaded[@"gyroAiming"]);
+    [store setObject:loaded forKey:FNVTouchSettingsKey];cold=[[NSUserDefaults alloc] initWithSuiteName:suite];
+    check("new preferences reload without modifying the v5 rollback copy",[FNVTouchLoadSettings(cold) isEqual:loaded]&&[[store objectForKey:@"FNVTouchControls.v5"] isEqual:v5]);
+    [store removeObjectForKey:FNVTouchSettingsKey];[store removeObjectForKey:@"FNVTouchControls.v5"];
     NSMutableDictionary *legacy=FNVDefaultSettings();legacy[@"version"]=@2;
     for(NSMutableDictionary *button in legacy[@"gameButtons"])[button removeObjectsForKeys:@[@"visible",@"label",@"opacity"]];
     legacy[@"gameButtons"][0][@"x"]=@.31;
@@ -38,7 +44,7 @@ int main(void){@autoreleasepool{
     NSMutableDictionary *v4=FNVDefaultSettings();v4[@"version"]=@4;v4[@"radialOrder"]=[@[@6,@3,@2,@0,@4,@5,@1] mutableCopy];[v4 removeObjectForKey:@"moreOrder"];
     v4[@"gyroX"]=@5;v4[@"gameButtons"][0][@"x"]=@.77;
     [store setObject:v4 forKey:@"FNVTouchControls.v4"];loaded=FNVTouchLoadSettings(store);
-    check("v4 migration replaces ammo with holster in its existing radial position",[loaded[@"version"] intValue]==5&&[loaded[@"radialOrder"] isEqual:@[@6,@8,@2,@0,@4,@5,@1]]&&[loaded[@"moreOrder"] isEqual:@[@7,@3,@9,@10,@11,@12]]);
+    check("v4 migration replaces ammo with holster in its existing radial position",[loaded[@"version"] intValue]==6&&[loaded[@"radialOrder"] isEqual:@[@6,@8,@2,@0,@4,@5,@1]]&&[loaded[@"moreOrder"] isEqual:@[@7,@3,@9,@10,@11,@12]]);
     check("v4 migration preserves custom controls and leaves rollback preferences intact",[loaded[@"gyroX"] doubleValue]==5&&[loaded[@"gameButtons"][0][@"x"] doubleValue]==.77&&[[store objectForKey:@"FNVTouchControls.v4"] isEqual:v4]);
     [store removeObjectForKey:@"FNVTouchControls.v4"];
     NSMutableDictionary *v3=FNVDefaultSettings();v3[@"version"]=@3;
@@ -49,8 +55,8 @@ int main(void){@autoreleasepool{
     v3[@"ads"]=@1.003979206;v3[@"stickDeadzone"]=@.027393311;v3[@"smoothing"]=@.025;
     v3[@"gameButtons"][0][@"x"]=@.42;
     [store setObject:v3 forKey:@"FNVTouchControls.v3"];loaded=FNVTouchLoadSettings(store);
-    check("build14 migrates to classic 3x without inheriting saturated stick gain",[loaded[@"version"] intValue]==5&&[loaded[@"cameraDirect"] boolValue]&&[loaded[@"swipeX"] doubleValue]==3&&[loaded[@"lookX"] doubleValue]==2);
-    check("migration preserves customized gyro, inversion, activation and layout",[loaded[@"gyroX"] doubleValue]==5&&[loaded[@"gyroY"] doubleValue]==5&&[loaded[@"gyro"] boolValue]&&![loaded[@"gyroAiming"] boolValue]&&[loaded[@"gyroInvertX"] boolValue]&&fabs([loaded[@"gameButtons"][0][@"x"] doubleValue]-.42)<1e-9);
+    check("build14 migrates to classic 3x without inheriting saturated stick gain",[loaded[@"version"] intValue]==6&&[loaded[@"cameraDirect"] boolValue]&&[loaded[@"swipeX"] doubleValue]==3&&[loaded[@"lookX"] doubleValue]==2);
+    check("migration preserves customized gyro, inversion, activation and layout",[loaded[@"gyroX"] doubleValue]==5&&[loaded[@"gyroY"] doubleValue]==5&&[loaded[@"gyro"] boolValue]&&!loaded[@"gyroAiming"]&&[loaded[@"gyroInvertX"] boolValue]&&fabs([loaded[@"gameButtons"][0][@"x"] doubleValue]-.42)<1e-9);
     check("migration keeps explicit calibration and ADS values while removing old default attenuation",fabs([loaded[@"ads"] doubleValue]-1.003979206)<1e-9&&fabs([loaded[@"stickDeadzone"] doubleValue]-.027393311)<1e-9&&[loaded[@"smoothing"] doubleValue]==0);
     check("the prior build14 preference remains intact for rollback",[[store objectForKey:@"FNVTouchControls.v3"] isEqual:v3]);
     loaded[@"cameraDirect"]=@NO;loaded[@"swipeX"]=@4.5;loaded[@"lookMultiplier"]=@2;loaded[@"gyroX"]=@12;
@@ -72,7 +78,8 @@ int main(void){@autoreleasepool{
     BOOL allSwaps=YES;
     for(unsigned radial=0;radial<2;radial++)for(NSUInteger slot=0;slot<(radial?7:6);slot++)for(NSUInteger action=0;action<FNVUtilityCount;action++){
         NSMutableDictionary *layout=FNVDefaultSettings(),*beforeSwap=FNVCopySettings(layout);BOOL changed=FNVUtilityAssign(layout,radial,slot,action);
-        BOOL permitted=radial?(slot!=6||[@[@0,@1,@2,@8,@4,@5,@6] containsObject:@(action)]):action!=FNVUtilityMore;
+        BOOL sameList=[beforeSwap[radial?@"radialOrder":@"moreOrder"] containsObject:@(action)];
+        BOOL permitted=radial?(slot!=6||sameList):action!=FNVUtilityMore;
         if(changed!=permitted||!FNVUtilityLayoutValid(layout)||(!changed&&![layout isEqual:beforeSwap]))allSwaps=NO;
     }
     check("all 169 slot/action choices keep each utility reachable exactly once",allSwaps);

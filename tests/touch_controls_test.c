@@ -19,6 +19,15 @@ int main(void){
     physical=(FNVPadState){0};physical.rx=2000;fnv_pad_physical_state(&physical,1);fnv_pad_touch_state(&touch);fnv_pad_snapshot(&out);check("physical stick noise does not steal touch",!fnv_pad_physical_active()&&out.lx==touch.lx&&out.rx==touch.rx);fnv_pad_physical_state(NULL,0);fnv_pad_reset();
     FNVTouchContact aim=FNVTouchBegin(FNVTouchAimOwner,10,10,0);check("Aim slide enters Fire once",FNVTouchFireSlide(&aim,1)&&!FNVTouchFireSlide(&aim,1)&&aim.fire);check("leaving Fire releases attack",FNVTouchFireSlide(&aim,0)&&!aim.fire);
     FNVTouchContact swipe=FNVTouchBegin(FNVTouchLookOwner,10,10,0);check("ordinary swipe cannot acquire Fire",!FNVTouchFireSlide(&swipe,1)&&!swipe.fire);
+    aim=FNVTouchBegin(FNVTouchAimOwner,10,10,0);
+    check("short Aim contact is a tap without entering ADS",FNVTouchAimTap(&aim,.1,.32,1)&&!FNVTouchAimHold(&aim,.1,.32,1));
+    check("Aim hold consumes once at the threshold and cannot also tap",FNVTouchAimHold(&aim,.32,.32,1)&&!FNVTouchAimHold(&aim,.5,.32,1)&&!FNVTouchAimTap(&aim,.5,.32,1));
+    aim=FNVTouchBegin(FNVTouchAimOwner,10,10,0);
+    check("release can recognize a hold missed by a busy display tick",FNVTouchAimHold(&aim,1,.32,1));
+    aim=FNVTouchBegin(FNVTouchAimOwner,10,10,0);
+    check("releasing outside Aim triggers neither tap nor hold",!FNVTouchAimTap(&aim,.1,.32,0)&&!FNVTouchAimHold(&aim,.5,.32,0));
+    aim.lastX=60;check("dragging across Aim is not a short tap",!FNVTouchAimTap(&aim,.1,.32,1));
+    check("non-Aim contacts cannot trigger the Aim gesture",!FNVTouchAimTap(&swipe,.1,.32,1)&&!FNVTouchAimHold(&swipe,.5,.32,1));
     FNVTouchContact pip=FNVTouchBegin(FNVTouchUtilityOwner,10,10,0);check("utility short tap",FNVTouchUtilityTap(&pip,.1,.38));check("utility hold consumes B exactly once",FNVTouchRecognizeHold(&pip,.5,.38)&&!FNVTouchRecognizeHold(&pip,.6,.38)&&!FNVTouchUtilityTap(&pip,.6,.38));
     check("radial cancel boundaries",FNVTouchSector(0,0,24,125,7)==-1&&FNVTouchSector(130,0,24,125,7)==-1&&FNVTouchSector(0,-90,24,125,7)==0);
     FNVTouchVector a=FNVTouchStick(6,0,0,0,1.0/60,.2,.2,360,.24,1.6,0,0),b=FNVTouchStick(12,0,0,0,1.0/30,.2,.2,360,.24,1.6,0,0);check("frame-time normalized swipe",fabs(a.x-b.x)<1e-9&&a.x>0);

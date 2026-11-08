@@ -15,7 +15,6 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
 @property(nonatomic) NSInteger action;
 @property(nonatomic) CGPoint origin;
 @property(nonatomic) BOOL aimWasOn;
-@property(nonatomic) BOOL slidToFire;
 @end
 @implementation FNVFinger @end
 
@@ -33,6 +32,8 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
 - (void)assignUtility:(NSUInteger)action radial:(BOOL)radial slot:(NSUInteger)slot;
 - (CGFloat)utilityEditorAt:(CGFloat)y;
 - (NSString *)utilityName:(NSUInteger)action;
+- (void)toggleGyro;
+- (void)recognizeAimHold:(FNVFinger *)finger at:(double)now;
 @end
 
 @interface FNVTouchDisplayProxy : NSObject
@@ -102,7 +103,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
 - (NSMutableArray *)buttonSettings {return _standardFallback?_fallbackButtons:_settings[[self isGame]?@"gameButtons":@"pipButtons"];}
 - (NSArray<NSString *> *)buttonNames {
     if(_standardFallback)return @[@"LT",@"LB",@"Back",@"Start",@"RB",@"RT",@"↑",@"↓",@"←",@"→",@"A",@"B",@"X",@"Y",@"L3",@"R3"];
-    if([self isGame])return @[@"Fire",@"Aim",@"Interact",@"Jump",@"VATS",@"Pip-Boy"];
+    if([self isGame])return @[@"Fire",_editing?@"Aim / Gyro":(_aimed?@"Exit ADS":([_settings[@"gyro"] boolValue]?@"Gyro ON":@"Gyro OFF")),@"Interact",@"Jump",@"VATS",@"Pip-Boy"];
     if(_context==FNVContextVATS&&!_editing)return @[@"Queue",@"Target",@"Confirm",@"Cancel",@"Special X",@"Special Y",@"Body ↑",@"Body ↓",@"Body ←",@"Body →"];
     if(_context==FNVContextPipMap&&!_editing)return @[@"Next section",@"Prev section",@"Select / Travel",@"Back / Close",@"Place marker",@"Action Y",@"Zoom +",@"Zoom −",@"Previous tab",@"Next tab"];
     if(_context==FNVContextLockpick&&!_editing)return @[@"",@"",@"",@"Exit",@"Force lock",@"",@"",@"",@"",@""];
@@ -158,7 +159,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     for(NSInteger i=0;i<_count;i++){
         NSDictionary *b=settings[i];if((![b[@"visible"] boolValue]&&!_editing)||![self buttonAvailable:i])continue;
         CGFloat opacity=(_standardFallback?.82:FNVNumber(_settings,@"opacity",.72,.15,1))*FNVNumber(b,@"opacity",1,.1,1)*(_overlay?.28:1);
-        BOOL selected=(_editing&&_selected==i)||([self isGame]&&i==1&&_aimed);
+        BOOL selected=(_editing&&_selected==i)||([self isGame]&&i==1&&(_aimed||[_settings[@"gyro"] boolValue]));
         UIColor *fill=selected?[self amber:.18*opacity]:[UIColor colorWithWhite:0 alpha:.13*opacity];
         CGContextSetFillColorWithColor(cg,fill.CGColor);CGContextFillEllipseInRect(cg,_frames[i]);
         CGContextSetStrokeColorWithColor(cg,[self amber:opacity].CGColor);CGContextSetLineWidth(cg,selected?2:1);CGContextStrokeEllipseInRect(cg,_frames[i]);
@@ -287,6 +288,17 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     [self resetTouches];_overlay=kind;_radialArmed=NO;_radialSelection=-1;_radialStart=point;[self setNeedsDisplay];
 }
 - (void)persistSettings {if(!_editing)[NSUserDefaults.standardUserDefaults setObject:_settings forKey:FNVTouchSettingsKey];}
+- (void)toggleGyro {
+    _settings[@"gyro"]=@(![_settings[@"gyro"] boolValue]);[self persistSettings];
+    // Never reuse an old motion sample, or recalibrate against a moving phone
+    // on every tap. Explicit Calibrate / Recenter remains available in settings.
+    _gyroRateX=_gyroRateY=0;_gyroSampleAt=0;[self updateMotion];[self setNeedsDisplay];
+}
+- (void)recognizeAimHold:(FNVFinger *)finger at:(double)now {
+    FNVTouchContact state=finger.state;
+    if(FNVTouchAimHold(&state,now,FNVNumber(_settings,@"aimDelay",.32,.2,.8),[self hitButton:CGPointMake(state.lastX,state.lastY)]==1))_aimed=YES;
+    finger.state=state;
+}
 - (void)calibrate {
     _biasSumX=_biasSumY=0;_biasSamples=0;_calibrateUntil=CACurrentMediaTime()+.5;_lookDX=_lookDY=0;[self setNeedsDisplay];
 }
@@ -317,7 +329,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
         case FNVUtilityWeapons:_overlay=2;_radialArmed=NO;_radialSelection=-1;break;
         case FNVUtilityAmmo:[self pulseAction:18 duration:.15];break;
         case FNVUtilityView:[self pulseAction:13 duration:.12];break;
-        case FNVUtilityGyro:_settings[@"gyro"]=@(![_settings[@"gyro"] boolValue]);[self persistSettings];if([_settings[@"gyro"] boolValue])[self calibrate];break;
+        case FNVUtilityGyro:[self toggleGyro];break;
         case FNVUtilityMore:_overlay=3;break;
         case FNVUtilityCustomize:[self openEditor];break;
         case FNVUtilityHolster:[self pulseAction:7 duration:.85];break;
@@ -349,7 +361,7 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
             else if(CGRectContainsPoint(_moveRegion,p)||CGRectContainsPoint(_lookRegion,p)){int wanted=CGRectContainsPoint(_moveRegion,p)?FNVTouchMoveOwner:FNVTouchMenuOwner;BOOL held=NO;for(FNVFinger *old in _fingers.allValues)if(old.state.owner==wanted)held=YES;if(!held)owner=wanted;}
         }else if([self isGame]){
             if(hit==0)owner=FNVTouchFireOwner;
-            else if(hit==1){owner=FNVTouchAimOwner;finger.aimWasOn=_aimed;if(![_settings[@"aimHold"] boolValue])_aimed=YES;}
+            else if(hit==1){BOOL held=NO;for(FNVFinger *old in _fingers.allValues)if(old.state.owner==FNVTouchAimOwner)held=YES;if(!held){owner=FNVTouchAimOwner;finger.aimWasOn=_aimed;}}
             else if(hit==5)owner=FNVTouchUtilityOwner;
             else if(hit>=0)owner=FNVTouchActionOwner;
             else if(CGRectContainsPoint(_moveRegion,p)){BOOL hasMove=NO;for(FNVFinger *old in _fingers.allValues)if(old.state.owner==FNVTouchMoveOwner)hasMove=YES;if(!hasMove)owner=FNVTouchMoveOwner;}
@@ -375,7 +387,9 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     FNVTouchContact state=finger.state;double dx=p.x-state.lastX,dy=p.y-state.lastY;
     if(state.owner==FNVTouchFireOwner||state.owner==FNVTouchAimOwner){
         FNVTouchFireSlide(&state,[self insideFire:p]);
-        if(state.fire)finger.slidToFire=YES;
+        // Sliding Aim onto Fire is an explicit aim-and-shoot gesture, even
+        // before the hold timer expires. It must never become a gyro tap.
+        if(state.owner==FNVTouchAimOwner&&state.fire){_aimed=YES;state.consumed=1;}
         if(state.owner==FNVTouchFireOwner||state.fire){double gain=FNVNumber(_settings,@"fireGain",1,.2,3);_lookDX+=dx*gain;_lookDY+=dy*gain;}
     }else if(state.owner==FNVTouchLookOwner||(state.owner==FNVTouchMenuOwner&&!_standardFallback&&!FNVTouchRightStickContext(_context))){
 #ifdef FNV_PROBE
@@ -393,10 +407,15 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     for(UITouch *touch in touches){FNVFinger *finger=_fingers[[NSValue valueWithNonretainedObject:touch]];if(finger)[self moveFinger:finger to:[touch locationInView:self]];}[self setNeedsDisplay];
 }
 - (void)finishTouches:(NSSet<UITouch *> *)touches cancelled:(BOOL)cancelled {
+    if(_inputEpoch!=fnv_pad_input_epoch()||_context!=fnv_pad_context()||fnv_pad_physical_active()){[self resetTouches];return;}
     for(UITouch *touch in touches){NSValue *key=[NSValue valueWithNonretainedObject:touch];FNVFinger *finger=_fingers[key];if(!finger)continue;
         if(!cancelled)[self moveFinger:finger to:[touch locationInView:self]];
+        double now=CACurrentMediaTime();
+        if(!cancelled&&finger.state.owner==FNVTouchAimOwner)[self recognizeAimHold:finger at:now];
         FNVTouchContact state=finger.state;
-        if(state.owner==FNVTouchAimOwner&&![_settings[@"aimHold"] boolValue]&&finger.aimWasOn&&!finger.slidToFire)_aimed=NO;
+        if(!cancelled&&FNVTouchAimTap(&state,now,FNVNumber(_settings,@"aimDelay",.32,.2,.8),[self hitButton:CGPointMake(state.lastX,state.lastY)]==1)){
+            if(finger.aimWasOn)_aimed=NO;else[self toggleGyro];
+        }
         if(!cancelled&&state.owner==FNVTouchUtilityOwner&&FNVTouchUtilityTap(&state,CACurrentMediaTime(),FNVNumber(_settings,@"hold",.38,.22,.8)))[self pulseAction:14 duration:.10];
         if(!cancelled&&state.owner==FNVTouchOverlayOwner){
             if(_overlay==3){if(finger.action>=0&&CGRectContainsPoint([self moreItem:finger.action],[touch locationInView:self]))[self moreAction:finger.action];else[self resetTouches];}
@@ -440,12 +459,13 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     if(_recoveryStarted&&now-_recoveryStarted>1.2){_recoveryStarted=0;[self openEditor];}
     if(_suspended||_editing||fnv_pad_physical_active()){FNVPadState zero={0};fnv_pad_touch_state(&zero);return;}
     for(FNVFinger *finger in [_fingers.allValues copy]){
+        [self recognizeAimHold:finger at:now];
         FNVTouchContact state=finger.state;if(FNVTouchRecognizeHold(&state,now,FNVNumber(_settings,@"hold",.38,.22,.8))){
             CGPoint point=CGPointMake(state.lastX,state.lastY);NSValue *key=nil;for(NSValue *candidate in _fingers)if(_fingers[candidate]==finger){key=candidate;break;}
             [self openOverlay:1 origin:point];state.owner=FNVTouchOverlayOwner;state.fire=0;finger.state=state;if(key)_fingers[key]=finger;break;
         }
     }
-    FNVPadState state={0};BOOL holdingAim=NO;
+    FNVPadState state={0};
     if(_standardFallback){
         for(FNVFinger *finger in _fingers.allValues){FNVTouchContact c=finger.state;
             if(c.owner==FNVTouchFallbackOwner&&finger.action>=0&&[self hitButton:CGPointMake(c.lastX,c.lastY)]==finger.action)FNVTouchFallbackButton(&state,(unsigned)finger.action);
@@ -455,15 +475,15 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
         for(FNVFinger *finger in _fingers.allValues){FNVTouchContact c=finger.state;
             if(c.owner==FNVTouchMoveOwner||(c.owner==FNVTouchMenuOwner&&FNVTouchRightStickContext(_context))){FNVTouchNavigationStick(&state,_context,c.owner==FNVTouchMenuOwner,c.lastX-finger.origin.x,c.lastY-finger.origin.y,FNVNumber(_settings,@"radius",54,20,120),FNVNumber(_settings,@"moveDeadzone",.1,0,.5),FNVNumber(_settings,@"moveResponse",1,.4,3));}
             else if(c.owner==FNVTouchFireOwner&&c.fire)[self addCode:fnv_pad_binding(4) state:&state];
-            else if(c.owner==FNVTouchAimOwner){holdingAim=YES;if(c.fire)[self addCode:fnv_pad_binding(4) state:&state];}
+            else if(c.owner==FNVTouchAimOwner){if(c.fire)[self addCode:fnv_pad_binding(4) state:&state];}
             else if(c.owner==FNVTouchActionOwner&&finger.action>=0&&finger.action<6)[self addCode:fnv_pad_binding(FNVGameplayActions[finger.action]) state:&state];
         }
-        BOOL aim=_aimed||([_settings[@"aimHold"] boolValue]&&holdingAim);if(aim&&[self isGame])[self addCode:fnv_pad_binding(6) state:&state];
+        BOOL aim=_aimed;if(aim&&[self isGame])[self addCode:fnv_pad_binding(6) state:&state];
         if([self isGame]){
             FNVTouchVector filtered=FNVTouchSmooth((FNVTouchVector){_smoothX,_smoothY},_lookDX,_lookDY,dt,FNVNumber(_settings,@"smoothing",0,0,.12));
             _smoothX=filtered.x;_smoothY=filtered.y;
             double gx=0,gy=0;
-            if([_settings[@"gyro"] boolValue]&&(![_settings[@"gyroAiming"] boolValue]||aim)&&!_calibrateUntil&&now-_gyroSampleAt<.15){
+            if([_settings[@"gyro"] boolValue]&&!_calibrateUntil&&now-_gyroSampleAt<.15){
                 gx=_gyroRateX-_biasX;gy=_gyroRateY-_biasY;if(fabs(gx)<.018)gx=0;if(fabs(gy)<.018)gy=0;
                 gx*=[_settings[@"gyroInvertX"] boolValue]?-1:1;gy*=[_settings[@"gyroInvertY"] boolValue]?-1:1;
             }
@@ -554,7 +574,9 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     CGFloat w=_editorPanel.bounds.size.width,y=8;__weak FNVGameplayTouchView *weak=self;
     NSArray *titles=@[@"Apply",@"Cancel",@"Preview"];
     for(unsigned i=0;i<3;i++){unsigned action=i;UIButton *button=[self editorButton:titles[i] rect:CGRectMake(8+i*(w-16)/3,y,(w-22)/3,36) handler:^{FNVGameplayTouchView *view=weak;if(!view)return;if(action<2)[view closeEditorApply:action==0];else{view->_editorPreview=YES;view->_editorPanel.hidden=YES;view->_editorReturn.hidden=NO;if(view->_editingUtilities){view->_selected=[view buttonSettings].count+2;view->_overlay=1;}[view setNeedsDisplay];}}];button.accessibilityIdentifier=@[@"editor-apply",@"editor-cancel",@"editor-preview"][i];[_editorPanel addSubview:button];}y+=44;
-    UISegmentedControl *layout=[[UISegmentedControl alloc] initWithItems:@[@"Gameplay",@"Pip-Boy",@"Utilities"]];layout.frame=CGRectMake(10,y,w-20,31);layout.selectedSegmentIndex=_editingUtilities?2:(_editingPip?1:0);layout.selectedSegmentTintColor=[self amber:.7];layout.accessibilityIdentifier=@"editor-layout";
+    UISegmentedControl *layout=[[UISegmentedControl alloc] initWithItems:@[@"Gameplay",@"Pip-Boy",@"Utilities"]];layout.frame=CGRectMake(10,y,w-20,31);layout.selectedSegmentIndex=_editingUtilities?2:(_editingPip?1:0);layout.selectedSegmentTintColor=[self amber:.22];layout.accessibilityIdentifier=@"editor-layout";
+    [layout setTitleTextAttributes:@{NSForegroundColorAttributeName:[self amber:.9],NSFontAttributeName:[UIFont systemFontOfSize:12 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
+    [layout setTitleTextAttributes:@{NSForegroundColorAttributeName:[self amber:1],NSFontAttributeName:[UIFont systemFontOfSize:12 weight:UIFontWeightBold]} forState:UIControlStateSelected];
     __weak UISegmentedControl *weakLayout=layout;[layout addAction:[UIAction actionWithHandler:^(UIAction *action){FNVGameplayTouchView *view=weak;UISegmentedControl *control=weakLayout;if(!view||!control)return;view->_editingPip=control.selectedSegmentIndex==1;view->_editingUtilities=control.selectedSegmentIndex==2;view->_selected=0;view->_editorPanel.contentOffset=CGPointZero;[view setNeedsLayout];[view rebuildEditor];}] forControlEvents:UIControlEventValueChanged];[_editorPanel addSubview:layout];y+=39;
     if(_editingUtilities){y=[self utilityEditorAt:y];_editorPanel.contentSize=CGSizeMake(w,y);_editorPanel.contentOffset=CGPointMake(0,MIN(offset.y,MAX(0,y-_editorPanel.bounds.size.height)));return;}
     NSArray *targets=[self editorTargets];if(_selected>=(NSInteger)targets.count)_selected=0;
@@ -590,9 +612,10 @@ static const unsigned FNVMenuMasks[10]={0,0,0x1000,0x2000,0x4000,0x8000,1,2,4,8}
     y=[self editorHeading:@"Controller response (Direct off)" at:y];
     y=[self editorSlider:@"Horizontal controller gain" target:_settings key:@"lookX" low:.02 high:4 y:y];y=[self editorSlider:@"Vertical controller gain" target:_settings key:@"lookY" low:.02 high:4 y:y];
     y=[self editorSlider:@"Stick dead-zone calibration" target:_settings key:@"stickDeadzone" low:0 high:.5 y:y];y=[self editorSlider:@"Stick response calibration" target:_settings key:@"stickResponse" low:.4 high:3 y:y];y=[self editorSlider:@"Maximum turn-rate calibration" target:_settings key:@"maxTurnRate" low:60 high:1000 y:y];
-    y=[self editorSwitch:@"Hold Aim / melee block (off: toggle)" target:_settings key:@"aimHold" y:y];
+    y=[self editorHeading:@"Aim: tap gyro, hold ADS, tap to exit" at:y];
+    y=[self editorSlider:@"Aim hold time (seconds)" target:_settings key:@"aimDelay" low:.2 high:.8 y:y];
     y=[self editorHeading:@"Gyroscope" at:y];
-    y=[self editorSwitch:@"Enable gyro" target:_settings key:@"gyro" y:y];y=[self editorSwitch:@"Only while aiming (off: always in gameplay)" target:_settings key:@"gyroAiming" y:y];
+    y=[self editorSwitch:@"Enable gyro (independent of ADS)" target:_settings key:@"gyro" y:y];
     y=[self editorSlider:@"Gyro horizontal multiplier" target:_settings key:@"gyroX" low:.1 high:20 y:y];y=[self editorSlider:@"Gyro vertical multiplier" target:_settings key:@"gyroY" low:.1 high:20 y:y];y=[self editorSwitch:@"Invert horizontal gyro" target:_settings key:@"gyroInvertX" y:y];y=[self editorSwitch:@"Invert vertical gyro" target:_settings key:@"gyroInvertY" y:y];
     UIButton *calibrate=[self editorButton:@"Calibrate / Recenter gyro" rect:CGRectMake(10,y,w-20,36) handler:^{[weak calibrate];}];[_editorPanel addSubview:calibrate];y+=44;
     UIButton *resetLayout=[self editorButton:@"Reset Layout" rect:CGRectMake(10,y,w-20,38) handler:^{FNVGameplayTouchView *view=weak;if(!view)return;NSMutableDictionary *defaults=FNVDefaultSettings();NSString *buttons=view->_editingPip?@"pipButtons":@"gameButtons",*move=view->_editingPip?@"pipMove":@"move",*look=view->_editingPip?@"pipLook":@"look";view->_settings[buttons]=defaults[buttons];view->_settings[move]=defaults[move];view->_settings[look]=defaults[look];[view setNeedsLayout];[view rebuildEditor];}];[_editorPanel addSubview:resetLayout];y+=48;
