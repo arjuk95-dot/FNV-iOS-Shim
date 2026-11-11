@@ -1,0 +1,65 @@
+name: Verify portable Linux and Mac parity
+on:
+  push:
+    branches: [ci/portable-native-checks]
+    paths:
+      - '.github/workflows/portable-parity.yml'
+      - '.github/workflows/portable.yml'
+      - 'tests/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  suites:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-26]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Execute identical media and texture scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir parity
+          bash tests/run_portable.sh media 2>&1 | tee parity/media.log
+          bash tests/run_portable.sh texture 2>&1 | tee parity/texture.log
+          python3 - <<'PY'
+          import json, pathlib
+          summary = {}
+          for suite, count in [('media', 204), ('texture', 42)]:
+              lines = pathlib.Path(f'parity/{suite}.log').read_text().splitlines()
+              summary[suite] = sorted(line for line in lines if line.startswith(('PASS:', 'Historical ')))
+              assert len(summary[suite]) == count, (suite, len(summary[suite]), count)
+          pathlib.Path('parity/scenarios.json').write_text(json.dumps(summary, indent=2))
+          print('Verified 204 media and 42 texture scenario records, including historical failures.')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: FNV-parity-${{ matrix.runner }}
+          path: parity
+          retention-days: 3
+  compare:
+    needs: suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: FNV-parity-*
+          path: parity
+      - name: Require identical successful scenario records
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          root = pathlib.Path('parity')
+          linux = json.loads((root / 'FNV-parity-ubuntu-latest/scenarios.json').read_text())
+          mac = json.loads((root / 'FNV-parity-macos-26/scenarios.json').read_text())
+          assert linux == mac, 'Linux/Mac scenario records differ'
+          print('PASS: all 246 scenario records match across Linux and macOS.')
+          PY

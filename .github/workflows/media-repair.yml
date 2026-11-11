@@ -10,7 +10,12 @@ permissions:
   contents: read
   actions: read
 jobs:
+  portable:
+    uses: ./.github/workflows/portable.yml
+    with:
+      suite: media
   media-repairs:
+    needs: portable
     # Standard Intel capacity is independent of the unavailable ARM64 pool.
     # Native codec ARM64 regressions remain in media.yml; the iPhone compilation
     # below still targets ARM64 and validates the existing pinned iOS codecs.
@@ -22,24 +27,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: bash tests/run.sh
-      - run: python3 tests/audio_shims_test.py
-      - run: python3 tests/dsound_lifetime_test.py --reference
-      - run: python3 tests/dsound_lifetime_test.py
       - run: python3 tests/dshow_source_test.py --reference
       - run: python3 tests/dshow_source_test.py
-      - run: python3 tests/mmio_ioproc_test.py --reference
-      - run: python3 tests/mmio_ioproc_test.py
-      - run: python3 tests/bink_shims_test.py
       - run: python3 tests/native_video_test.py
       - run: python3 tests/movie_draw_test.py --reference
       - run: python3 tests/movie_draw_test.py
-      - run: python3 tests/input_display_test.py
-      - run: python3 tests/touch_controls_test.py
       - run: python3 tests/touch_settings_test.py
       - run: python3 tests/app_icon_test.py
-      - run: python3 tests/guest_diagnostics_test.py
-      - run: python3 tests/calltrace_equivalence_test.py
       - run: python3 tests/display_preferences_test.py --reference
       - run: python3 tests/display_preferences_test.py
       - run: python3 tools/fetch_codecs.py ios --out build/codecs-ios
