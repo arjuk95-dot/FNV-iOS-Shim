@@ -3,7 +3,12 @@ on: workflow_dispatch
 permissions:
   contents: read
 jobs:
+  portable:
+    uses: ./.github/workflows/portable.yml
+    with:
+      suite: texture
   texture:
+    needs: portable
     runs-on: macos-15
     timeout-minutes: 5
     steps:
@@ -12,10 +17,4 @@ jobs:
           fetch-depth: 0
       - run: python3 tests/virtual_alloc_test.py --reference
       - run: python3 tests/virtual_alloc_test.py
-      - run: python3 tests/texture_residency_test.py
-      - run: python3 tests/texture_lifetime_test.py --reference
-      - run: python3 tests/texture_copy_test.py --reference
-      - run: python3 tests/texture_lifetime_test.py
-      - run: python3 tests/texture_copy_test.py
-      - run: python3 tests/heap_diagnostics_test.py
       - run: python3 tools/build.py host-check

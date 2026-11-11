@@ -1,8 +1,10 @@
 #include "FNVGuestMemory.h"
 #include "../upstream/recomp/host/gheap.c"
 #include <assert.h>
+#include "no_core.h"
 uint8_t *MEM;
 int main(int argc,char **argv){
+    fnv_test_disable_core_dumps();
     assert(argc==2);MEM=fnv_reserve_guest();assert(MEM!=MAP_FAILED);
     uint32_t q=gmalloc(40);
     if(!strcmp(argv[1],"tail")){MEM[q+40]=0;gfree(q);}

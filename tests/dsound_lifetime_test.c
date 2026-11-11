@@ -9,6 +9,7 @@
 #endif
 #include FNV_DSOUND_SOURCE
 #include <assert.h>
+#include "no_core.h"
 uint8_t *MEM;HostImport host_imports[MAX_IMPORTS];int host_import_count;
 void rt_trap(CPU *c,int n,uint32_t a){(void)c;fprintf(stderr,"trap %d %#x\n",n,a);abort();}
 int fnv_audio_start(void){return 1;}
@@ -27,6 +28,7 @@ static uint32_t make_buffer(int primary){
 static uint32_t query(uint32_t b,const uint8_t *guid,uint32_t *object){memcpy(MEM+iid,guid,16);P32(output,0xabcdef);uint32_t hr=CALL(b,0,b,iid,output);*object=G32(output);return hr;}
 static void drain(uint32_t b){unsigned count=0;while(CALL(b,2,b)){assert(++count<8);}}
 int main(int argc,char **argv){
+    fnv_test_disable_core_dumps();
     assert(argc==2);MEM=fnv_reserve_guest();assert(MEM!=MAP_FAILED);stack=gmalloc(128);output=gmalloc(4);iid=gmalloc(16);
     assert(invoke(dsound_shims.list[0].fn,(uint32_t[]){0,output,0},3)==0);ds=G32(output);
     const char *mode=argv[1];uint32_t b=make_buffer(!strcmp(mode,"listener")),s=0;

@@ -1,0 +1,33 @@
+name: Check portable native regressions
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        type: choice
+        default: media
+        options: [media, texture]
+      runner:
+        description: Use macOS only for an explicit cross-platform parity check
+        type: choice
+        default: ubuntu-latest
+        options: [ubuntu-latest, macos-15, macos-26-intel]
+  workflow_call:
+    inputs:
+      suite:
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  portable:
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Historical regression cases deliberately compile earlier sources.
+          fetch-depth: 0
+      - name: Run every scenario, including historical failures
+        env:
+          SUITE: ${{ inputs.suite }}
+        run: bash tests/run_portable.sh "$SUITE"

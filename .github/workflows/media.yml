@@ -11,18 +11,13 @@ permissions:
   contents: read
   actions: read
 jobs:
-  archive-wav:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - run: python3 tests/mmio_ioproc_test.py --reference
-      - run: python3 tests/mmio_ioproc_test.py
-      - run: python3 tests/touch_controls_test.py
-      - run: python3 tests/input_display_test.py
+  portable:
+    if: ${{ !endsWith(inputs.runner, '-intel') }}
+    uses: ./.github/workflows/portable.yml
+    with:
+      suite: media
   media:
+    needs: portable
     if: ${{ !endsWith(inputs.runner, '-intel') }}
     runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 15
@@ -32,23 +27,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: bash tests/run.sh
-      - run: python3 tests/audio_shims_test.py
-      - run: python3 tests/mmio_ioproc_test.py
-      - run: python3 tests/dsound_lifetime_test.py --reference
-      - run: python3 tests/dsound_lifetime_test.py
       - run: python3 tests/dshow_source_test.py --reference
       - run: python3 tests/dshow_source_test.py
       - run: python3 tools/fetch_codecs.py macos --out build/codecs-macos
       - run: python3 tests/vorbis_bridge_test.py build/codecs-macos
-      - run: python3 tests/bink_shims_test.py
       - run: python3 tests/native_video_test.py
       - run: python3 tests/movie_draw_test.py --reference
       - run: python3 tests/movie_draw_test.py
-      - run: python3 tests/input_display_test.py
-      - run: python3 tests/touch_controls_test.py
-      - run: python3 tests/guest_diagnostics_test.py
-      - run: python3 tests/calltrace_equivalence_test.py
       - run: python3 tests/touch_settings_test.py
       - run: python3 tests/touch_overlay_test.py
       - uses: actions/upload-artifact@v4
