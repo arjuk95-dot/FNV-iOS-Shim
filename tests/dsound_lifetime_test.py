@@ -13,6 +13,7 @@ with tempfile.TemporaryDirectory() as folder:
     for mode in ['sdk-destructor','sdk-min-distance-abi','independent-counts','listener','canonical-interface','unknown-iid','duplicate-spatial']:
         result=subprocess.run([str(binary),mode],capture_output=True,text=True,timeout=20)
         print(result.stdout,end='');print(result.stderr,end='')
+        assert result.returncode != 125, 'Core-dump test setup failed: '+mode
         if result.returncode:failures.append(mode)
         if args.reference and mode=='sdk-destructor':assert 'reason=freed-pointer' in result.stderr and 'alias=1' in result.stdout
     if args.reference:

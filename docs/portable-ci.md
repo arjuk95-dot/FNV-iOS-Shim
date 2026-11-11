@@ -4,7 +4,9 @@
 suite on Ubuntu before allocating a Mac. A failed portable suite prevents the
 Apple job from starting. The Intel route invokes the repair workflow, which
 owns its own Linux prerequisite, so portable tests run once on either route.
-Routine media/texture workflows remain manual. The isolated\n`ci/portable-native-checks` branch has a parity-only push check for these test and\nworkflow edits; there are no cancellation changes.
+Routine media/texture workflows remain manual. The isolated
+`ci/portable-native-checks` branch has a parity-only push check for these test and
+workflow edits; there are no cancellation changes.
 
 ## Coverage
 
@@ -25,10 +27,12 @@ Routine media/texture workflows remain manual. The isolated\n`ci/portable-native
   exercises warm object caching and is not redundant.
 
 Every original test command is retained in its effective workflow; the
-previous duplicate Linux/Mac MMIO and input checks are consolidated. The intentional heap-corruption harness disables core dumps in its own child
-process, avoiding hosted crash collectors scanning a 4 GiB guest mapping. It
-now requires SIGABRT as well as the exact corruption diagnostic. All existing
-scenarios, expected historical failures and production sources are preserved.
+previous duplicate Linux/Mac MMIO and input checks are consolidated. The intentional heap-corruption and historical lifetime fixtures disable core
+dumps only in their own child processes, avoiding hosted crash collectors
+scanning a 4 GiB guest mapping. Core-limit setup failures are rejected separately
+from historical regressions. Heap checks also require SIGABRT as well as the
+exact corruption diagnostic. All existing scenarios, expected historical
+failures and production sources are preserved.
 
 ## Platform parity and limits
 

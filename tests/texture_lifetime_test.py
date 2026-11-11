@@ -14,6 +14,7 @@ with tempfile.TemporaryDirectory() as temp:
     failed=[]
     for mode in ['bound-get-rebind','texture-stages','stream-index','render-target-depth']+([] if args.reference else ['shader-declaration']):
         result=subprocess.run([str(binary),mode],timeout=20)
+        assert result.returncode != 125, 'Core-dump test setup failed: '+mode
         if result.returncode:failed.append(mode)
     if args.reference:assert len(failed)==4,failed;print('Historical lifetime failures reproduced:',failed)
     elif failed:raise SystemExit('Lifetime regressions: '+','.join(failed))

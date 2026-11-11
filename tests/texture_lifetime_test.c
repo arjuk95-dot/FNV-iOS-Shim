@@ -5,6 +5,7 @@
 #endif
 #include FNV_D3D_SOURCE
 #include <assert.h>
+#include "no_core.h"
 uint8_t *MEM; HostImport host_imports[MAX_IMPORTS]; int host_import_count;
 void rt_trap(CPU *c,int n,uint32_t a){(void)c;fprintf(stderr,"trap %d at %#x\n",n,a);abort();}
 static uint32_t stack;
@@ -18,6 +19,7 @@ static int good=1;
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"FAIL: %s\n",#x);good=0;}}while(0)
 static void reap_all(void){g_d3d.frames+=4;reap();g_d3d.frames+=4;reap();}
 int main(int argc,char **argv){
+    fnv_test_disable_core_dumps();
     assert(argc==2);MEM=fnv_reserve_guest();assert(MEM!=MAP_FAILED);make_vtables();stack=gmalloc(256);
     const char *mode=argv[1];
     if(!strcmp(mode,"bound-get-rebind")){
