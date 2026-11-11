@@ -25,8 +25,10 @@ Routine media/texture workflows remain manual. The isolated\n`ci/portable-native
   exercises warm object caching and is not redundant.
 
 Every original test command is retained in its effective workflow; the
-previous duplicate Linux/Mac MMIO and input checks are consolidated. No fixture,
-assertion, expected historical failure, or production source was changed.
+previous duplicate Linux/Mac MMIO and input checks are consolidated. The intentional heap-corruption harness disables core dumps in its own child
+process, avoiding hosted crash collectors scanning a 4 GiB guest mapping. It
+now requires SIGABRT as well as the exact corruption diagnostic. All existing
+scenarios, expected historical failures and production sources are preserved.
 
 ## Platform parity and limits
 
